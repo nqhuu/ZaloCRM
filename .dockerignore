@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.vite
+**/coverage
+.git
+.env
+docs/release-images
+docs/screenshots
+docs/user-guide-images
+*.log
