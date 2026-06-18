@@ -38,6 +38,24 @@ function sameStringSet(a: string[], b: string[]): boolean {
   return true;
 }
 
+function zaloThreadIdCandidates(value: string | null | undefined): string[] {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const candidates = new Set<string>([raw]);
+  if (raw.startsWith('g') && raw.length > 1) {
+    candidates.add(raw.slice(1));
+  } else {
+    candidates.add(`g${raw}`);
+  }
+  return [...candidates];
+}
+
+function zaloThreadIdMatches(labelConversationIds: string[], threadId: string): boolean {
+  const wanted = new Set(zaloThreadIdCandidates(threadId));
+  if (wanted.size === 0) return false;
+  return labelConversationIds.some((id) => zaloThreadIdCandidates(id).some((candidate) => wanted.has(candidate)));
+}
+
 /**
  * Pull labels from a Zalo account via SDK, upsert into DB, then recompute Friend.zaloLabels
  * for every friend of that account. Returns { labels, friendsUpdated }.
@@ -456,7 +474,7 @@ export async function zaloLabelsRoutes(app: FastifyInstance): Promise<void> {
             offset: l.offset,
             syncedAt: l.syncedAt,
             assignedCount: convs.length,
-            assignedTo: threadId ? convs.includes(threadId) : false,
+            assignedTo: threadId ? zaloThreadIdMatches(convs, threadId) : false,
           };
         }),
       };
@@ -566,6 +584,19 @@ export async function zaloLabelsRoutes(app: FastifyInstance): Promise<void> {
       const newLabelId = request.body?.labelId ?? null;
       if (!threadId) return reply.status(400).send({ error: 'threadId is required' });
 
+      const conversation = await prisma.conversation.findFirst({
+        where: {
+          orgId: account.orgId,
+          zaloAccountId: account.id,
+          OR: zaloThreadIdCandidates(threadId).map((candidate) => ({ externalThreadId: candidate })),
+        },
+        select: { threadType: true },
+      });
+      const labelThreadId = conversation?.threadType === 'group' && !threadId.startsWith('g')
+        ? `g${threadId}`
+        : threadId;
+      const threadIdVariants = new Set(zaloThreadIdCandidates(labelThreadId));
+
       const api = zaloPool.getApi(account.id);
       if (!api || typeof api.updateLabels !== 'function') {
         return reply.status(503).send({ error: 'Zalo account chưa kết nối — không thể gán tag' });
@@ -580,7 +611,7 @@ export async function zaloLabelsRoutes(app: FastifyInstance): Promise<void> {
 
       // Strip threadId khỏi mọi label (single-select cleanup)
       for (const l of labelData) {
-        l.conversations = (l.conversations || []).filter(c => c !== threadId);
+        l.conversations = (l.conversations || []).filter(c => !threadIdVariants.has(c));
       }
 
       // Add to new label if provided
@@ -588,7 +619,7 @@ export async function zaloLabelsRoutes(app: FastifyInstance): Promise<void> {
         const target = labelData.find(l => Number(l.id) === newLabelId);
         if (!target) return reply.status(400).send({ error: 'Label ID không tồn tại' });
         target.conversations = target.conversations || [];
-        if (!target.conversations.includes(threadId)) target.conversations.push(threadId);
+        if (!target.conversations.includes(labelThreadId)) target.conversations.push(labelThreadId);
       }
 
       logger.info(`[zalo-labels] Pushing labelData (${labelData.length} labels, v=${version}) → Zalo for thread ${threadId}, newLabelId=${newLabelId}`);
@@ -616,7 +647,7 @@ export async function zaloLabelsRoutes(app: FastifyInstance): Promise<void> {
       const result = await syncLabelsForAccount(account.id, account.orgId, {
         seedLabelData: seedLabelData as LabelDataFromSdk[],
         seedVersion,
-        affectedUidsOnly: [threadId],
+        affectedUidsOnly: [threadId, labelThreadId],
       });
       return { ok: true, assignedLabelId: newLabelId, ...result };
     } catch (err) {

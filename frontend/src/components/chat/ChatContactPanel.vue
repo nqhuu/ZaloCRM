@@ -162,6 +162,27 @@
           </template>
         </section>
 
+        <section v-if="props.conversationId" class="ip-section confirmation-setting-section">
+          <div class="ip-section-title">
+            <span class="accent" style="background: var(--smax-warning)" />
+            Cần xác nhận
+          </div>
+          <div class="confirmation-setting-row">
+            <select
+              v-model="confirmationDraft"
+              :disabled="confirmationLoading || confirmationSaving"
+              @change="saveConfirmationSetting"
+            >
+              <option v-if="confirmationDraft === ''" value="" disabled>Chưa cài đặt</option>
+              <option value="true">Có</option>
+              <option value="false">Không</option>
+            </select>
+            <span class="confirmation-setting-hint">
+              Áp dụng cho user/nhóm Zalo này
+            </span>
+          </div>
+        </section>
+
         <v-alert v-if="saveSuccess" type="success" density="compact" class="mx-3 my-2" closable
           @click:close="saveSuccess = false">
           Đã lưu thành công!
@@ -368,7 +389,7 @@
 import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Contact } from '@/composables/use-contacts';
-import type { AiSentiment } from '@/composables/use-chat';
+import type { AiSentiment, Conversation } from '@/composables/use-chat';
 import { useChatContactPanel } from '@/composables/use-chat-contact-panel';
 import ChatAppointments from './ChatAppointments.vue';
 import AiSummaryCard from '@/components/ai/ai-summary-card.vue';
@@ -389,12 +410,14 @@ import ScoreHistoryModal from '@/components/scoring/ScoreHistoryModal.vue';
 const props = defineProps<{
   contactId: string | null;
   contact: Contact | null;
+  conversation?: Conversation | null;
+  conversationId?: string | null;
   // Nick CRM đang xem KH này — dùng để xác định Friend row "active" cho per-pair tag.
   activeZaloAccountId?: string | null;
   // Friend.id của cặp (contact × activeZaloAccount). Cần để fetch score breakdown per-pair.
   friendId?: string | null;
   // Friendship per-pair (nick × KH) — chứa aliasInNick để sync 2-way với Zalo Real.
-  friendship?: { id?: string; aliasInNick?: string | null } | null;
+  friendship?: { id?: string; aliasInNick?: string | null; zaloLabels?: Array<{ id?: string | number; name?: string; text?: string; color?: string }> } | null;
   aiSummary: string;
   aiSummaryLoading: boolean;
   aiSentiment: AiSentiment | null;
@@ -444,6 +467,54 @@ async function saveAlias() {
 }
 
 // ════════ Tab state (persist sang tab khác KH khác) ════════
+const confirmationLoading = ref(false);
+const confirmationSaving = ref(false);
+const confirmationDraft = ref<'' | 'true' | 'false'>('');
+
+function setConfirmationDraft(value: boolean | null | undefined) {
+  confirmationDraft.value = value === true ? 'true' : value === false ? 'false' : '';
+}
+
+async function loadConfirmationSetting() {
+  const conversationId = props.conversationId;
+  if (!conversationId) {
+    setConfirmationDraft(null);
+    return;
+  }
+  confirmationLoading.value = true;
+  try {
+    const { data } = await api.get('/archive/save-context', { params: { conversationId } });
+    setConfirmationDraft(data.conversationConfirmationDefault ?? null);
+  } catch {
+    setConfirmationDraft(null);
+  } finally {
+    confirmationLoading.value = false;
+  }
+}
+
+async function saveConfirmationSetting() {
+  const conversationId = props.conversationId;
+  if (!conversationId || confirmationDraft.value === '' || confirmationSaving.value) return;
+  confirmationSaving.value = true;
+  try {
+    const { data } = await api.patch(`/archive/conversations/${conversationId}/confirmation-default`, {
+      requiresConfirmation: confirmationDraft.value === 'true',
+    });
+    setConfirmationDraft(data.requiresConfirmation ?? null);
+    aliasToast.success('Đã lưu cài đặt Cần xác nhận');
+    emit('saved');
+  } catch (err: any) {
+    aliasToast.error(err?.response?.data?.error || 'Không thể lưu cài đặt Cần xác nhận');
+    await loadConfirmationSetting();
+  } finally {
+    confirmationSaving.value = false;
+  }
+}
+
+watch(() => props.conversationId, () => {
+  void loadConfirmationSetting();
+}, { immediate: true });
+
 const activeTab = ref<'profile' | 'relations' | 'activity' | 'score'>('profile');
 
 // ════════════════════════════════════════════════════════════════════════
@@ -567,6 +638,7 @@ interface FriendItem {
   leadScore: number;
   zaloDisplayName: string | null;
   zaloAvatarUrl: string | null;
+  zaloLabels?: Array<{ id?: string | number; name?: string; text?: string; color?: string }>;
   crmTagsPerNick: string[];
   statusRef: { id: string; name: string; order: number; color: string | null } | null;
   zaloAccount: { id: string; displayName: string | null; avatarUrl?: string | null; owner: { id: string; fullName: string } | null };
@@ -688,8 +760,13 @@ function openFullProfile() {
   router.push(`/contacts/${props.contact.id}/profile`);
 }
 
-// MOCK: zaloLabels (per-pair native labels) chưa expose qua API
-const zaloLabels = ref<string[]>([]);
+// Zalo native labels from active friend and current conversation.
+function labelNamesFrom(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((label: any) => String(label?.name || label?.text || '').trim())
+    .filter(Boolean);
+}
 
 // Per-pair CRM tags: tags RIÊNG cho cặp (nick active × KH). KHÁC contact.tags
 // (cấp KH chung). Trigger PATCH /friends/:id để persist.
@@ -697,6 +774,16 @@ const activeFriend = computed<FriendItem | null>(() => {
   if (!props.activeZaloAccountId) return null;
   return relations.value.friends.find(f => f.zaloAccount.id === props.activeZaloAccountId) || null;
 });
+
+const zaloLabels = computed<string[]>(() => {
+  const labels = [
+    ...labelNamesFrom(props.friendship?.zaloLabels),
+    ...labelNamesFrom(activeFriend.value?.zaloLabels),
+    ...labelNamesFrom(props.conversation?.nativeLabels),
+  ];
+  return [...new Set(labels)];
+});
+
 const perPairTags = computed<string[]>({
   get: () => activeFriend.value?.crmTagsPerNick || [],
   set: (v) => {
@@ -1118,6 +1205,30 @@ function relativeTime(dateStr: string) {
   width: 3px; height: 14px;
   border-radius: 2px;
   background: var(--smax-grey-300);
+}
+.confirmation-setting-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  align-items: center;
+  gap: 8px;
+}
+.confirmation-setting-row select {
+  width: 100%;
+  border: 1px solid var(--smax-grey-300);
+  border-radius: 6px;
+  background: var(--smax-bg);
+  color: var(--smax-text);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.confirmation-setting-row select:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.confirmation-setting-hint {
+  color: var(--smax-grey-600);
+  font-size: 12px;
 }
 .scope-tag {
   font-size: 10px; padding: 1px 6px;

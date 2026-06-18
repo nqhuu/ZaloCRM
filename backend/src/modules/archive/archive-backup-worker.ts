@@ -11,6 +11,7 @@ import {
   uploadUrlToDrive,
 } from './google-archive-client.js';
 import { archiveSummary, archiveStoryInclude } from './archive-service.js';
+import { emitNotificationNew } from '../notifications/notification-events.js';
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
@@ -145,7 +146,7 @@ export async function syncStory(storyId: string, io?: Server): Promise<void> {
       conversationName: story.conversationName,
     });
 
-    await prisma.$transaction([
+    const [, , notification] = await prisma.$transaction([
       prisma.archiveStory.update({
         where: { id: story.id },
         data: {
@@ -176,6 +177,14 @@ export async function syncStory(storyId: string, io?: Server): Promise<void> {
       storyId: story.id,
       userId: story.createdByUserId,
       summary: archiveSummary(story),
+    });
+    emitNotificationNew(io, {
+      orgId: story.orgId,
+      userId: story.createdByUserId,
+      source: 'archive',
+      sourceId: story.id,
+      type: 'backup_completed',
+      notificationId: notification.id,
     });
   } catch (error) {
     const attempts = story.backupAttempts + 1;

@@ -288,10 +288,14 @@ export async function getArchiveSaveContext(actor: ArchiveActor, conversationId?
 
   let defaultDepartment = user.departmentMember?.department || null;
   let defaultAssignedUser = { id: user.id, fullName: user.fullName };
+  let conversationConfirmationDefault: boolean | null = null;
+  let conversationConfirmationUpdatedAt: Date | null = null;
   if (conversationId) {
     const conversation = await prisma.conversation.findFirst({
       where: { id: conversationId, orgId: actor.orgId },
       select: {
+        requiresConfirmationDefault: true,
+        requiresConfirmationUpdatedAt: true,
         zaloAccount: {
           select: {
             department: {
@@ -308,6 +312,8 @@ export async function getArchiveSaveContext(actor: ArchiveActor, conversationId?
         },
       },
     });
+    conversationConfirmationDefault = conversation?.requiresConfirmationDefault ?? null;
+    conversationConfirmationUpdatedAt = conversation?.requiresConfirmationUpdatedAt ?? null;
     const primary = conversation?.zaloAccount.access[0]?.user;
     if (canAssignOthers && conversation?.zaloAccount.department) {
       defaultDepartment = conversation.zaloAccount.department;
@@ -325,6 +331,8 @@ export async function getArchiveSaveContext(actor: ArchiveActor, conversationId?
     defaultAssignedUser,
     currentDepartment: user.departmentMember?.department || null,
     currentUser: { id: user.id, fullName: user.fullName },
+    conversationConfirmationDefault,
+    conversationConfirmationUpdatedAt,
     canAssignOthers,
     canViewOthers,
     departments,

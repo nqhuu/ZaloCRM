@@ -6,7 +6,7 @@ Viec ban giao ho so don hang khong nen chi la thao tac doi `assignedUserId`. Ngu
 
 Phuong an chot:
 
-- Nhan vien dang xu ly ho so chi duoc de nghi ban giao cho nguoi dang la `secondary_n` hop le cua tai khoan Zalo.
+- Nhan vien dang xu ly ho so chi duoc de nghi ban giao cho nguoi dang la `secondary_1`, `secondary_1` hoac `secondary_n` hop le cua tai khoan Zalo.
 - Truong phong/Admin co the dieu phoi linh hoat hon, nhung khong duoc chuyen am tham cho nguoi khong co quyen chat tren nick Zalo.
 - Neu can chuyen cho nguoi khac trong phong, he thong phai dong thoi tao/cap quyen thao tac Zalo co thoi han hoac yeu cau gan nguoi do vao nhom phu trach Zalo.
 - Phu trach chinh tam thoi can ho tro khoang `tu ngay` den `den ngay`, khong chi mot ngay don le.
@@ -33,7 +33,7 @@ Nhan vien dang xu ly ho so duoc tao yeu cau ban giao neu:
 
 Nguoi nhan hop le:
 
-- La mot vai tro `secondary_n` cua tai khoan Zalo, vi du `secondary_1`, `secondary_2`, `secondary_3`.
+- La `secondary_1`, `secondary_2` hoac `secondary_n` cua tai khoan Zalo.
 - Dang active.
 - Thuoc phong ban hien hanh cua tai khoan Zalo.
 - Co quyen `chat` hoac `admin` tren tai khoan Zalo.
@@ -55,6 +55,8 @@ Nguoi nhan duoc chia thanh hai nhom:
 Nguoi nhan da la:
 
 - `primary`
+- `secondary_1`
+- `secondary_2`
 - `secondary_n`
 
 Va co quyen `chat/admin` tren tai khoan Zalo.
@@ -87,6 +89,8 @@ Khong tu dong gan vinh vien nguoi do thanh `primary/secondary` neu UI khong noi 
 Hien tai he thong co `ZaloAccountAccess.assignmentRole` de gan:
 
 - `primary`
+- `secondary_1`
+- `secondary_2`
 - `secondary_n`
 
 Nhung chua co lop phu trach chinh tam thoi theo khoang ngay. Can bo sung model:
@@ -152,6 +156,7 @@ Phu trach Zalo
 - Phu trach chinh
 - Phu trach phu 1
 - Phu trach phu 2
+- Phu trach phu n
 
 Uy quyen tam thoi
 - Tu ngay
@@ -174,23 +179,17 @@ Da co:
 
 - `ZaloAccount.departmentId`.
 - `ZaloAccountAccess.assignmentRole`.
-- Unique moi tai khoan chi co mot role `primary` va mot nguoi cho moi vi tri `secondary_n`.
+- Unique moi tai khoan chi co mot role `primary`, `secondary_1`, `secondary_2`, `secondary_n`.
 - UI phan quyen nick Zalo co the gan vai tro phu trach.
-- Ban giao thong thuong da bi gioi han sang nhom `secondary_n`.
+- Ban giao thong thuong da bi gioi han sang `secondary_1/secondary_2/secondary_n`.
 - Nhan ban giao co kiem tra lai nguoi nhan con la phu trach phu hop le.
 
-Da bo sung trong lan thuc hien nay:
+Chua co:
 
 - `ZaloAccountPrimaryDelegation`.
-- Service `getEffectivePrimaryAssignee`.
-- API list/create/cancel uy quyen phu trach chinh tam thoi tren tai khoan Zalo.
-- UI tao/huy uy quyen tu ngay den ngay trong popup phan quyen nick Zalo.
-- Tao ho so moi se uu tien `effectivePrimary` thay vi primary goc khi dang trong ngay uy quyen.
-- Manager override chi hien/chuyen duoc cho nhan su co quyen thao tac nick Zalo hop le.
-
-Con lai:
-
-- Quyen Zalo co thoi han theo nguon uy quyen da duoc gan metadata `primary_delegation`, tu cap khi den ngay va tu thu hoi/restore khi huy hoac het han.
+- UI tao uy quyen tu ngay den ngay.
+- Quyen Zalo co thoi han theo nguon uy quyen.
+- Rang buoc manager override phai gan voi quyen thao tac nick Zalo.
 - Chip/cot hien ban giao `A -> B` tren list/Kanban.
 
 ## 9. Thu tu trien khai de an toan

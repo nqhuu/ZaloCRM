@@ -96,6 +96,7 @@ export interface Conversation {
   threadType: 'user' | 'group';
   contact: Contact | null;
   zaloAccount: ZaloAccount | null;
+  nativeLabels?: Array<{ id?: number | string; name?: string; color?: string; emoji?: string | null; accountId?: string }>;
   /** Tên nhóm Zalo (chỉ có khi threadType=group) — backend resolve qua getGroupInfo */
   groupName?: string | null;
   /** Avatar nhóm Zalo URL (chỉ có khi threadType=group) */
@@ -557,6 +558,7 @@ export function useChat() {
         // friendship per-pair (counter, leadScore, status RIÊNG cặp nick×KH).
         // KHÔNG fallback contact aggregate vì các trường này khác semantics.
         if (convDetail.data.friendship !== undefined) conv.friendship = convDetail.data.friendship;
+        if (convDetail.data.nativeLabels !== undefined) conv.nativeLabels = convDetail.data.nativeLabels;
       }
     } catch {
       // Non-critical

@@ -321,9 +321,14 @@ function mergedTags(conv: Conversation): string[] {
   const contactTags = Array.isArray(conv.contact?.tags) ? (conv.contact!.tags as string[]) : [];
   const friendTagsRaw = (conv.friendship as { crmTagsPerNick?: string[] } | null | undefined)?.crmTagsPerNick;
   const friendTags = Array.isArray(friendTagsRaw) ? friendTagsRaw : [];
+  const nativeTags = (Array.isArray((conv as any).nativeLabels) ? (conv as any).nativeLabels : [])
+    .map((label: any) => String(label?.name || label?.text || '').trim())
+    .filter(Boolean)
+    .map((name: string) => `\uD83D\uDD35 ${name}`);
   // Dedup, Zalo-managed (🔵 prefix) lên trước
   const seen = new Set<string>();
   const result: string[] = [];
+  for (const t of nativeTags) if (!seen.has(t)) { seen.add(t); result.push(t); }
   for (const t of friendTags) if (t.startsWith('🔵 ') && !seen.has(t)) { seen.add(t); result.push(t); }
   for (const t of friendTags) if (!t.startsWith('🔵 ') && !seen.has(t)) { seen.add(t); result.push(t); }
   for (const t of contactTags) if (!seen.has(t)) { seen.add(t); result.push(t); }

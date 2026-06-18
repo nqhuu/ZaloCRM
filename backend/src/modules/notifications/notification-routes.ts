@@ -9,6 +9,7 @@ import { prisma } from '../../shared/database/prisma-client.js';
 import { authMiddleware } from '../auth/auth-middleware.js';
 import { zaloPool } from '../zalo/zalo-pool.js';
 import { getZaloScope } from '../zalo/zalo-scope.js';
+import { emitNotificationUpdated } from './notification-events.js';
 
 type NotificationSeverity = 'info' | 'warning' | 'error' | 'success';
 type NotificationPriority = 'low' | 'medium' | 'high' | 'critical';
@@ -56,6 +57,11 @@ function archiveSeverity(type: string): NotificationSeverity {
   if (type === 'message_recalled') return 'error';
   if (type.includes('pending') || type.includes('handover') || type.includes('transfer')) return 'warning';
   return 'info';
+}
+
+function archiveMessageIdFromNotification(type: string, dedupeKey: string | null): string | undefined {
+  if (type !== 'message_recalled' || !dedupeKey?.startsWith('archive-recall:')) return undefined;
+  return dedupeKey.slice('archive-recall:'.length) || undefined;
 }
 
 function isActionableUnread(notification: Pick<NotificationItem, 'requiresAck' | 'acknowledgedAt' | 'readAt'>): boolean {
@@ -177,6 +183,7 @@ export async function notificationRoutes(app: FastifyInstance) {
           kind: actionKind,
           path,
           storyId: item.storyId || undefined,
+          messageId: archiveMessageIdFromNotification(item.type, item.dedupeKey),
         },
       };
     }));
@@ -350,6 +357,14 @@ export async function notificationRoutes(app: FastifyInstance) {
       where: { id: notification.id },
       data: { seenAt: new Date() },
     });
+    emitNotificationUpdated((app as any).io, {
+      orgId: user.orgId,
+      userId: notification.userId,
+      source: 'archive',
+      sourceId: notification.storyId,
+      type: notification.type,
+      notificationId: notification.id,
+    });
     return { ok: true };
   });
 
@@ -359,6 +374,13 @@ export async function notificationRoutes(app: FastifyInstance) {
     if (!isPersistedNotificationId(id)) {
       if (isComputedNotificationId(id)) {
         await markComputedNotificationRead(user, id);
+        emitNotificationUpdated((app as any).io, {
+          orgId: user.orgId,
+          userId: user.id,
+          source: 'computed',
+          type: id,
+          notificationId: id,
+        });
       }
       return { ok: true };
     }
@@ -370,6 +392,14 @@ export async function notificationRoutes(app: FastifyInstance) {
         readAt: notification.readAt || new Date(),
         seenAt: notification.seenAt || new Date(),
       },
+    });
+    emitNotificationUpdated((app as any).io, {
+      orgId: user.orgId,
+      userId: notification.userId,
+      source: 'archive',
+      sourceId: notification.storyId,
+      type: notification.type,
+      notificationId: notification.id,
     });
     return { ok: true };
   });
@@ -393,6 +423,14 @@ export async function notificationRoutes(app: FastifyInstance) {
         seenAt: notification.seenAt || new Date(),
       },
     });
+    emitNotificationUpdated((app as any).io, {
+      orgId: user.orgId,
+      userId: notification.userId,
+      source: 'archive',
+      sourceId: notification.storyId,
+      type: notification.type,
+      notificationId: notification.id,
+    });
     return { ok: true };
   });
 
@@ -410,6 +448,12 @@ export async function notificationRoutes(app: FastifyInstance) {
         readAt: new Date(),
         seenAt: new Date(),
       },
+    });
+    emitNotificationUpdated((app as any).io, {
+      orgId: user.orgId,
+      userId: user.id,
+      source: 'notification',
+      type: 'mark_all_read',
     });
     return { ok: true };
   });

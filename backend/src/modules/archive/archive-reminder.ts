@@ -4,6 +4,7 @@ import { config } from '../../config/index.js';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { logger } from '../../shared/utils/logger.js';
 import { oneLine } from './archive-format.js';
+import { emitNotificationNew } from '../notifications/notification-events.js';
 
 export function startArchiveReminder(io: Server): void {
   cron.schedule(config.archiveReminderCron, () => void runArchiveReminder(io));
@@ -56,7 +57,7 @@ export async function runArchiveReminder(io: Server): Promise<void> {
     const detail = items.slice(0, 8)
       .map((story) => `${story.conversationName}: ${oneLine(story.title || story.conversationContent).slice(0, 80)}`)
       .join('\n');
-    await prisma.archiveNotification.create({
+    const notification = await prisma.archiveNotification.create({
       data: {
         orgId: items[0].orgId,
         userId,
@@ -67,6 +68,15 @@ export async function runArchiveReminder(io: Server): Promise<void> {
         dedupeKey: `archive-eod:${dayKey}:user:${userId}`,
       },
     }).catch(() => null);
+    if (notification) {
+      emitNotificationNew(io, {
+        orgId: items[0].orgId,
+        userId,
+        source: 'archive',
+        type: 'end_of_day_pending',
+        notificationId: notification.id,
+      });
+    }
     io.to(`org:${items[0].orgId}`).emit('archive:end-of-day-reminder', {
       userId,
       count: items.length,
@@ -87,7 +97,7 @@ export async function runArchiveReminder(io: Server): Promise<void> {
     });
     const detail = [...counts.entries()].map(([name, count]) => `${name}: ${count}`).join('\n');
     for (const manager of managers) {
-      await prisma.archiveNotification.create({
+      const notification = await prisma.archiveNotification.create({
         data: {
           orgId,
           userId: manager.id,
@@ -98,6 +108,15 @@ export async function runArchiveReminder(io: Server): Promise<void> {
           dedupeKey: `archive-eod:${dayKey}:manager:${manager.id}`,
         },
       }).catch(() => null);
+      if (notification) {
+        emitNotificationNew(io, {
+          orgId,
+          userId: manager.id,
+          source: 'archive',
+          type: 'end_of_day_manager',
+          notificationId: notification.id,
+        });
+      }
     }
   }
 

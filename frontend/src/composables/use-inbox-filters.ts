@@ -70,6 +70,33 @@ export type ScoreTier = 'cold' | 'warm' | 'hot' | 'champion' | null;
 export type StuckDuration = '>3d' | '>7d' | '>14d' | '>30d' | null;
 export type LastMessageWithin = '24h' | '7d' | '30d' | '>30d' | 'custom' | null;
 export type SaleAssigneeFilter = string | null | 'all' | 'unassigned';
+export type ZaloLabelMatchMode = 'or' | 'and';
+
+const DEFAULT_ACTIVE_TAB: ActiveTab = 'main';
+const LAST_ACTIVE_TAB_STORAGE_KEY = 'zalocrm.chat.lastActiveTab';
+
+function isActiveTab(value: unknown): value is ActiveTab {
+  return value === 'personal' || value === 'group' || value === 'main' || value === 'other';
+}
+
+function loadLastActiveTab(): ActiveTab {
+  if (typeof window === 'undefined') return DEFAULT_ACTIVE_TAB;
+  try {
+    const saved = window.localStorage.getItem(LAST_ACTIVE_TAB_STORAGE_KEY);
+    return isActiveTab(saved) ? saved : DEFAULT_ACTIVE_TAB;
+  } catch {
+    return DEFAULT_ACTIVE_TAB;
+  }
+}
+
+function saveLastActiveTab(tab: ActiveTab) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(LAST_ACTIVE_TAB_STORAGE_KEY, tab);
+  } catch {
+    // Ignore storage errors in private mode or quota-limited browsers.
+  }
+}
 
 export interface FilterState {
   folderId: string | null;
@@ -78,6 +105,8 @@ export interface FilterState {
   activeTab: ActiveTab;
   quickPills: Set<QuickPillKey>;
   tagsZalo: string[];
+  /** Native Zalo label match mode. `or` = bat ky tag nao, `and` = phai co tat ca tag da chon. */
+  zaloLabelMode: ZaloLabelMatchMode;
   tagsCrm: string[];
   sortMode: SortMode;
   timeAxis: TimeAxis;
@@ -102,15 +131,20 @@ export interface FilterState {
   engagementPatterns: EngagementPatternKey[];
 }
 
+function isZaloLabelIdToken(value: string): boolean {
+  return /^[^:\s]+:\d+$/.test(value);
+}
+
 // ─── Default state ──────────────────────────────────────────────────────
 
 export function defaultFilterState(): FilterState {
   return {
     folderId: null,
     saleAssigneeId: null,
-    activeTab: 'personal', // Default: Cá nhân (user-user 1-1)
+    activeTab: loadLastActiveTab(), // Default: Chinh, then restore last tab used.
     quickPills: new Set(),
     tagsZalo: [],
+    zaloLabelMode: 'or',
     tagsCrm: [],
     sortMode: 'recent',
     timeAxis: 'last-interaction',
@@ -192,6 +226,7 @@ export function useInboxFilters() {
       activeTab: state.activeTab,
       quickPills: Array.from(state.quickPills),
       tagsZalo: state.tagsZalo,
+      zaloLabelMode: state.zaloLabelMode,
       tagsCrm: state.tagsCrm,
       sortMode: state.sortMode,
       timeAxis: state.timeAxis,
@@ -212,9 +247,13 @@ export function useInboxFilters() {
     const j = preset.filterJson as Partial<FilterState> & { quickPills?: string[] };
     if (j.folderId !== undefined) state.folderId = j.folderId;
     if (j.saleAssigneeId !== undefined) state.saleAssigneeId = j.saleAssigneeId;
-    if (j.activeTab) state.activeTab = j.activeTab;
+    if (j.activeTab && isActiveTab(j.activeTab)) {
+      state.activeTab = j.activeTab;
+      saveLastActiveTab(j.activeTab);
+    }
     if (j.quickPills) state.quickPills = new Set(j.quickPills as QuickPillKey[]);
     if (j.tagsZalo) state.tagsZalo = j.tagsZalo;
+    if (j.zaloLabelMode === 'and' || j.zaloLabelMode === 'or') state.zaloLabelMode = j.zaloLabelMode;
     if (j.tagsCrm) state.tagsCrm = j.tagsCrm;
     if (j.sortMode) state.sortMode = j.sortMode;
     if (j.timeAxis) state.timeAxis = j.timeAxis;
@@ -242,6 +281,7 @@ export function useInboxFilters() {
 
   function setActiveTab(t: ActiveTab) {
     state.activeTab = t;
+    saveLastActiveTab(t);
     activePresetId.value = null;
   }
 
@@ -287,7 +327,13 @@ export function useInboxFilters() {
     // (saleAssigneeId === null = self mặc định, FE handle currentUser fallback)
 
     // Tags
-    if (state.tagsZalo.length > 0) params.zaloLabels = state.tagsZalo.join(',');
+    // Native Zalo labels use stable tokens: "<zaloAccountId>:<zaloLabelId>".
+    // Keep legacy label-name query for old presets / mirrored tag data.
+    const nativeZaloLabelTokens = state.tagsZalo.filter(isZaloLabelIdToken);
+    const legacyZaloLabels = state.tagsZalo.filter((value) => !isZaloLabelIdToken(value));
+    if (nativeZaloLabelTokens.length > 0) params.zaloLabelIds = nativeZaloLabelTokens.join(',');
+    if (nativeZaloLabelTokens.length > 1 && state.zaloLabelMode === 'and') params.zaloLabelMode = 'and';
+    if (legacyZaloLabels.length > 0) params.zaloLabels = legacyZaloLabels.join(',');
     if (state.tagsCrm.length > 0) params.tags = state.tagsCrm.join(',');
 
     // Time range
@@ -323,6 +369,7 @@ export function useInboxFilters() {
       state.saleAssigneeId !== null ||
       state.quickPills.size > 0 ||
       state.tagsZalo.length > 0 ||
+      state.zaloLabelMode !== 'or' ||
       state.tagsCrm.length > 0 ||
       state.sortMode !== 'recent' ||
       state.timeRangePreset !== '7d' ||

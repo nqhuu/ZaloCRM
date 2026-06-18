@@ -39,6 +39,7 @@ import {
   resolveArchiveStatusByLegacy,
   transitionPermission,
 } from './archive-status-service.js';
+import { emitNotificationCount } from '../notifications/notification-events.js';
 
 function searchTerms(input?: string): string[] {
   const raw = String(input || '').trim();
@@ -72,6 +73,77 @@ function isAppendBlockedByStatus(story: {
     : story.businessStatus !== 'pending';
 }
 
+const ARCHIVE_TABLE_COLUMN_PREF_KEY = 'archive.tableColumnPrefs';
+const ARCHIVE_PRIORITY_OPTIONS_KEY = 'archive.priorityOptions';
+const DEFAULT_ARCHIVE_PRIORITY_OPTIONS = [
+  { key: 'low', label: 'Thap', color: 'info', sortOrder: 10, isDefault: false, isActive: true },
+  { key: 'normal', label: 'Binh thuong', color: 'neutral', sortOrder: 20, isDefault: true, isActive: true },
+  { key: 'high', label: 'Uu tien', color: 'warning', sortOrder: 30, isDefault: false, isActive: true },
+  { key: 'urgent', label: 'Gap', color: 'error', sortOrder: 40, isDefault: false, isActive: true },
+];
+const ARCHIVE_TABLE_COLUMN_KEYS = new Set([
+  'orderCode',
+  'title',
+  'customer',
+  'receivedAt',
+  'priority',
+  'requiresConfirmation',
+  'extraNote',
+  'lastMessage',
+  'department',
+  'assignee',
+  'status',
+  'actions',
+]);
+
+function normalizeArchiveTableColumnPrefs(input: unknown) {
+  const rows = Array.isArray(input) ? input : [];
+  return rows
+    .filter((row): row is { key: string; visible?: unknown; order?: unknown; width?: unknown; pinned?: unknown } => (
+      row && typeof row === 'object' && ARCHIVE_TABLE_COLUMN_KEYS.has((row as any).key)
+    ))
+    .map((row, index) => ({
+      key: row.key,
+      visible: typeof row.visible === 'boolean' ? row.visible : true,
+      order: Number.isFinite(Number(row.order)) ? Number(row.order) : index,
+      ...(Number.isFinite(Number(row.width)) ? { width: Number(row.width) } : {}),
+      ...(row.pinned === 'left' || row.pinned === 'right' || row.pinned === null ? { pinned: row.pinned } : {}),
+    }))
+    .sort((left, right) => left.order - right.order)
+    .map((row, index) => ({ ...row, order: index }));
+}
+
+function normalizeArchivePriorityOptions(input: unknown) {
+  const rows = Array.isArray(input) ? input : [];
+  const normalized = rows
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === 'object'))
+    .map((row, index) => {
+      const key = String(row.key || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+      const label = String(row.label || '').trim();
+      if (!key || !label) return null;
+      return {
+        key,
+        label,
+        color: typeof row.color === 'string' && row.color.trim() ? row.color.trim() : null,
+        sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : (index + 1) * 10,
+        isDefault: row.isDefault === true,
+        isActive: row.isActive !== false,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+  if (normalized.length === 0) return DEFAULT_ARCHIVE_PRIORITY_OPTIONS;
+  const seen = new Set<string>();
+  const deduped = normalized.filter((row) => {
+    if (seen.has(row.key)) return false;
+    seen.add(row.key);
+    return true;
+  });
+  const defaultIndex = deduped.findIndex((row) => row.isDefault && row.isActive);
+  return deduped
+    .map((row, index) => ({ ...row, isDefault: defaultIndex >= 0 ? index === defaultIndex : row.key === 'normal' }))
+    .sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
 async function withArchivePermissions<T extends {
   createdByUserId: string;
   assignedUserId: string | null;
@@ -100,6 +172,150 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (!(await actorHasArchiveGrant(actor, 'create'))) return forbidden(reply, 'archive.create');
     const { conversationId } = request.query as { conversationId?: string };
     return getArchiveSaveContext(actor, conversationId);
+  });
+
+  app.get('/api/v1/archive/table-column-prefs', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    const pref = await prisma.userPreference.findUnique({
+      where: { userId_key: { userId: actor.id, key: ARCHIVE_TABLE_COLUMN_PREF_KEY } },
+      select: { value: true, updatedAt: true },
+    });
+    return {
+      columns: normalizeArchiveTableColumnPrefs(pref?.value),
+      updatedAt: pref?.updatedAt || null,
+    };
+  });
+
+  app.put('/api/v1/archive/table-column-prefs', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    const body = request.body as { columns?: unknown };
+    const columns = normalizeArchiveTableColumnPrefs(body.columns);
+    if (columns.length === 0) return reply.status(400).send({ error: 'columns is required' });
+    const pref = await prisma.userPreference.upsert({
+      where: { userId_key: { userId: actor.id, key: ARCHIVE_TABLE_COLUMN_PREF_KEY } },
+      create: { userId: actor.id, key: ARCHIVE_TABLE_COLUMN_PREF_KEY, value: columns as any },
+      update: { value: columns as any },
+    });
+    return { columns, updatedAt: pref.updatedAt };
+  });
+
+  app.get('/api/v1/archive/priority-options', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    const setting = await prisma.appSetting.findUnique({
+      where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY } },
+    });
+    let saved: unknown = null;
+    if (setting?.valuePlain) {
+      try {
+        saved = JSON.parse(setting.valuePlain);
+      } catch {
+        saved = null;
+      }
+    }
+    return {
+      options: normalizeArchivePriorityOptions(saved),
+      updatedAt: setting?.updatedAt ?? null,
+      canConfigure: ['owner', 'admin'].includes(actor.role),
+    };
+  });
+
+  app.put('/api/v1/archive/priority-options', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!['owner', 'admin'].includes(actor.role)) return forbidden(reply, 'admin');
+    const body = request.body as { options?: unknown };
+    const options = normalizeArchivePriorityOptions(body.options);
+    const activeDefaults = options.filter((option) => option.isActive && option.isDefault);
+    if (activeDefaults.length !== 1) {
+      return reply.status(400).send({ error: 'Exactly one active default priority is required' });
+    }
+    const setting = await prisma.appSetting.upsert({
+      where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY } },
+      create: { orgId: actor.orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY, valuePlain: JSON.stringify(options) },
+      update: { valuePlain: JSON.stringify(options) },
+    });
+    return { options, updatedAt: setting.updatedAt };
+  });
+
+  app.patch('/api/v1/archive/conversations/:conversationId/confirmation-default', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    const { conversationId } = request.params as { conversationId: string };
+    const body = request.body as { requiresConfirmation?: boolean | null };
+    if (
+      body.requiresConfirmation !== true
+      && body.requiresConfirmation !== false
+    ) {
+      return reply.status(400).send({ error: 'requiresConfirmation must be true or false' });
+    }
+
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, orgId: actor.orgId },
+      select: {
+        id: true,
+        requiresConfirmationDefault: true,
+        zaloAccount: {
+          select: {
+            id: true,
+            department: { select: { path: true } },
+            access: {
+              where: { userId: actor.id, assignmentRole: 'primary' },
+              select: { id: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    if (!conversation) return reply.status(404).send({ error: 'Conversation not found' });
+
+    let canConfigureConversation = ['owner', 'admin'].includes(actor.role)
+      || conversation.zaloAccount.access.length > 0;
+    if (!canConfigureConversation) {
+      const membership = await prisma.departmentMember.findUnique({
+        where: { userId: actor.id },
+        select: {
+          deptRole: true,
+          department: { select: { path: true } },
+        },
+      });
+      canConfigureConversation = Boolean(
+        membership
+        && ['leader', 'deputy'].includes(membership.deptRole)
+        && conversation.zaloAccount.department?.path.startsWith(membership.department.path),
+      );
+    }
+    if (!canConfigureConversation) return forbidden(reply, 'archive.edit');
+
+    const now = new Date();
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          requiresConfirmationDefault: body.requiresConfirmation,
+          requiresConfirmationUpdatedByUserId: actor.id,
+          requiresConfirmationUpdatedAt: now,
+        },
+        select: {
+          id: true,
+          requiresConfirmationDefault: true,
+          requiresConfirmationUpdatedAt: true,
+        },
+      });
+      const stories = await tx.archiveStory.updateMany({
+        where: { orgId: actor.orgId, conversationId: conversation.id },
+        data: { requiresConfirmation: body.requiresConfirmation },
+      });
+      return { updated, affectedStories: stories.count };
+    });
+    return {
+      conversationId: result.updated.id,
+      requiresConfirmation: result.updated.requiresConfirmationDefault,
+      updatedAt: result.updated.requiresConfirmationUpdatedAt,
+      affectedStories: result.affectedStories,
+    };
   });
 
   app.get('/api/v1/archive/conversations/:conversationId/stories', async (request, reply) => {
@@ -395,7 +611,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       conversationId?: string;
       messageIds?: string[];
       title?: string | null;
-      titleSuffix?: string | null;
+      orderCode?: string | null;
+      priority?: string | null;
+      extraNote?: string | null;
       recordType?: string | null;
       departmentId?: string | null;
       assignedUserId?: string | null;
@@ -412,7 +630,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         conversationId: body.conversationId,
         messageIds: body.messageIds,
         title: body.title,
-        titleSuffix: body.titleSuffix,
+        orderCode: body.orderCode,
+        priority: body.priority,
+        extraNote: body.extraNote,
         recordType: body.recordType,
         departmentId: body.departmentId,
         assignedUserId: body.assignedUserId,
@@ -508,6 +728,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       conversationId?: string;
       zaloAccountId?: string;
       backupStatus?: string;
+      orderCode?: string;
+      priority?: string;
+      requiresConfirmation?: string;
       q?: string;
       titleQ?: string;
       customerQ?: string;
@@ -525,6 +748,16 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (query.conversationId) where.conversationId = query.conversationId;
     if (query.zaloAccountId) where.zaloAccountId = query.zaloAccountId;
     if (query.backupStatus) where.backupStatus = query.backupStatus;
+    if (query.priority && ['low', 'normal', 'high', 'urgent'].includes(query.priority)) {
+      where.priority = query.priority;
+    }
+    if (query.requiresConfirmation === 'true') {
+      where.requiresConfirmation = true;
+    } else if (query.requiresConfirmation === 'false') {
+      where.requiresConfirmation = false;
+    } else if (query.requiresConfirmation === 'unknown') {
+      where.requiresConfirmation = null;
+    }
     const receivedAtFilter: any = {};
     if (query.receivedFrom && !Number.isNaN(Date.parse(query.receivedFrom))) {
       receivedAtFilter.gte = new Date(query.receivedFrom);
@@ -535,11 +768,11 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (Object.keys(receivedAtFilter).length) where.receivedAt = receivedAtFilter;
     const fieldSearch: any[] = [];
     if (query.titleQ) {
-      const search = buildApproxSearch(['title'], query.titleQ);
+      const search = buildApproxSearch(['title', 'orderCode', 'extraNote'], query.titleQ);
       if (search.length) fieldSearch.push({ OR: search });
     }
     if (query.customerQ) {
-      const search = buildApproxSearch(['conversationName', 'contactPhone'], query.customerQ);
+      const search = buildApproxSearch(['customerNameSnapshot', 'conversationName', 'contactPhone'], query.customerQ);
       if (search.length) fieldSearch.push({ OR: search });
     }
     if (query.contentQ) {
@@ -553,7 +786,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     }
     if (fieldSearch.length) where.AND = [...(where.AND || []), ...fieldSearch];
     if (query.q) {
-      const search = buildApproxSearch(['title', 'conversationName', 'contactPhone', 'conversationContent'], query.q);
+      const search = buildApproxSearch(['title', 'orderCode', 'customerNameSnapshot', 'conversationName', 'contactPhone', 'conversationContent', 'extraNote'], query.q);
       if (search.length) where.AND = [...(where.AND || []), { OR: search }];
     }
 
@@ -687,6 +920,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         requestId: handoverRequest.id,
         status: handoverRequest.status,
       });
+      emitNotificationCount((app as any).io, {
+        orgId: actor.orgId,
+        source: 'archive',
+        sourceId: id,
+        type: 'archive_handover_requested',
+      });
       return reply.status(201).send({
         request: handoverRequest,
         message: 'Đã gửi yêu cầu bàn giao',
@@ -711,6 +950,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         storyId: result.request.storyId,
         assignedUserId: actor.id,
         requestId,
+      });
+      emitNotificationCount((app as any).io, {
+        orgId: actor.orgId,
+        source: 'archive',
+        sourceId: result.request.storyId,
+        type: 'archive_handover_accepted',
       });
       return {
         ...result,
@@ -738,6 +983,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         requestId,
         status: 'rejected',
       });
+      emitNotificationCount((app as any).io, {
+        orgId: actor.orgId,
+        source: 'archive',
+        sourceId: result.request.storyId,
+        type: 'archive_handover_rejected',
+      });
       return { ...result, message: 'Đã từ chối nhận bàn giao' };
     } catch (error) {
       return sendHandoverError(reply, error);
@@ -753,6 +1004,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         storyId: handoverRequest.storyId,
         requestId,
         status: 'cancelled',
+      });
+      emitNotificationCount((app as any).io, {
+        orgId: actor.orgId,
+        source: 'archive',
+        sourceId: handoverRequest.storyId,
+        type: 'archive_handover_cancelled',
       });
       return { request: handoverRequest, message: 'Đã huỷ yêu cầu bàn giao' };
     } catch (error) {
@@ -777,6 +1034,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         assignedUserId: story.assignedUserId,
         changedByUserId: actor.id,
       });
+      emitNotificationCount((app as any).io, {
+        orgId: actor.orgId,
+        source: 'archive',
+        sourceId: story.id,
+        type: 'archive_assignment_changed',
+      });
       return { story: await withArchivePermissions(actor, story), message: 'Đã chuyển người xử lý' };
     } catch (error) {
       return sendHandoverError(reply, error);
@@ -794,12 +1057,35 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(404).send({ error: 'Archive story not found' });
     }
     try {
+      const {
+        title,
+        orderCode,
+        priority,
+        extraNote,
+        recordType,
+        departmentId,
+        assignedUserId,
+      } = request.body as {
+        title?: string | null;
+        orderCode?: string | null;
+        priority?: string | null;
+        extraNote?: string | null;
+        recordType?: string;
+        departmentId?: string | null;
+        assignedUserId?: string | null;
+      };
       const story = await updateArchiveStoryMetadata({
         orgId: actor.orgId,
         userId: actor.id,
         userRole: actor.role,
         storyId: id,
-        ...(request.body as any),
+        title,
+        orderCode,
+        priority,
+        extraNote,
+        recordType,
+        departmentId,
+        assignedUserId,
       });
       return { story: await withArchivePermissions(actor, story), message: 'Đã cập nhật hồ sơ' };
     } catch (error) {

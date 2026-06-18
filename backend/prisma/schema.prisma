@@ -551,6 +551,9 @@ model Conversation {
   unreadCount       Int       @default(0) @map("unread_count")
   isReplied         Boolean   @default(true) @map("is_replied")
   tab               String    @default("main") @map("tab") // main, other
+  requiresConfirmationDefault Boolean? @map("requires_confirmation_default")
+  requiresConfirmationUpdatedByUserId String? @map("requires_confirmation_updated_by_user_id")
+  requiresConfirmationUpdatedAt DateTime? @map("requires_confirmation_updated_at")
   createdAt         DateTime  @default(now()) @map("created_at")
 
   org            Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -562,6 +565,7 @@ model Conversation {
   archiveStories ArchiveStory[]
 
   @@unique([zaloAccountId, externalThreadId])
+  @@index([orgId, requiresConfirmationDefault])
   @@index([orgId, zaloAccountId, isReplied, lastMessageAt])
   @@index([orgId, zaloAccountId, lastMessageAt])
   @@index([orgId, tab, lastMessageAt])
@@ -669,6 +673,12 @@ model ArchiveStory {
   zaloAccountUidSnapshot         String? @map("zalo_account_uid_snapshot")
   zaloAccountDeletedAt           DateTime? @map("zalo_account_deleted_at")
   title               String?
+  orderCode           String?   @map("order_code")
+  priority            String    @default("normal")
+  requiresConfirmation Boolean? @map("requires_confirmation")
+  extraNote           String?   @map("extra_note")
+  customerId          String?   @map("customer_id")
+  customerNameSnapshot String?  @map("customer_name_snapshot")
   recordType          String    @default("order") @map("record_type")
   conversationContent String    @map("conversation_content")
   receivedAt          DateTime? @map("received_at")
@@ -706,6 +716,10 @@ model ArchiveStory {
   @@index([orgId, businessStatus, createdAt])
   @@index([orgId, statusDefinitionId, createdAt])
   @@index([orgId, receivedAt])
+  @@index([orgId, orderCode])
+  @@index([orgId, priority, updatedAt])
+  @@index([orgId, requiresConfirmation, updatedAt])
+  @@index([orgId, customerId])
   @@index([orgId, assignmentOrigin, updatedAt])
   @@index([assignedUserId, businessStatus, createdAt])
   @@index([departmentId, businessStatus, createdAt])

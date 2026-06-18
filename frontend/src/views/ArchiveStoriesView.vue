@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="archive-page">
     <header class="archive-header">
       <div class="archive-summary">
@@ -19,6 +19,14 @@
           icon="mdi-tune-variant"
           title="Cấu hình trạng thái hồ sơ"
           @click="openStatusManager"
+        />
+        <v-btn
+          v-if="viewMode === 'list'"
+          class="config-trigger"
+          variant="text"
+          icon="mdi-table-column"
+          title="Cấu hình cột hiển thị"
+          @click="openArchiveColumnDialog"
         />
         <v-btn
           v-if="canConfigure"
@@ -179,6 +187,28 @@
             @update:model-value="applyFilters"
           />
         </details>
+        <label class="archive-filter-field">
+          <span>Mức độ ưu tiên</span>
+          <v-select
+            v-model="filters.priority"
+            :items="priorityOptions"
+            density="compact"
+            variant="outlined"
+            hide-details
+            @update:model-value="applyFilters"
+          />
+        </label>
+        <label class="archive-filter-field">
+          <span>Cần xác nhận</span>
+          <v-select
+            v-model="filters.requiresConfirmation"
+            :items="confirmationOptions"
+            density="compact"
+            variant="outlined"
+            hide-details
+            @update:model-value="applyFilters"
+          />
+        </label>
         <div class="archive-filter-footer">
           <div class="archive-filter-recall">
             <div>
@@ -213,28 +243,140 @@
           <table v-if="stories.length" class="archive-table">
             <thead>
               <tr>
-                <th>Đơn hàng</th>
-                <th>Khách hàng</th>
-                <th>Ngày/Giờ nhận</th>
-                <th class="message-column">Tin nhắn cuối</th>
-                <th>Phòng ban</th>
-                <th>Nhân viên</th>
-                <th>Trạng thái</th>
-                <th class="action-column">Thao tác</th>
+                <th
+                  v-for="column in visibleArchiveColumns"
+                  :key="column.key"
+                  :class="column.className"
+                >
+                  {{ column.label }}
+                </th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="story in stories" :key="story.id" class="clickable-story-row" @click="openDetail(story)">
-                <td><strong>{{ story.title || story.conversationName }}</strong></td>
-                <td>
-                  <strong>{{ story.conversationName }}</strong>
-                  <small>{{ story.contactPhone || accountDisplayName(story) || 'Không có SĐT' }}</small>
-                </td>
-                <td class="received-at-cell">
+                <td
+                  v-for="column in visibleArchiveColumns"
+                  :key="`${story.id}-${column.key}`"
+                  :class="column.className"
+                >
+                  <template v-if="column.key === 'orderCode'">
+                  <input
+                    v-if="isInlineEditing(story, 'orderCode')"
+                    v-model="inlineEdit.value"
+                    class="archive-inline-input"
+                    placeholder="Nhập mã đơn hàng"
+                    autofocus
+                    @click.stop
+                    @keydown.enter.prevent="saveInlineEdit(story)"
+                    @keydown.esc.prevent="cancelInlineEdit"
+                    @blur="saveInlineEdit(story)"
+                  />
+                  <button
+                    v-else
+                    class="archive-inline-value"
+                    type="button"
+                    :disabled="!canEditStoryMetadata(story)"
+                    :title="canEditStoryMetadata(story) ? 'Sửa mã đơn hàng' : mutationDeniedMessage(story)"
+                    @click.stop="startInlineEdit(story, 'orderCode', story.orderCode || '')"
+                  >
+                    <strong>{{ story.orderCode || 'Chưa có mã' }}</strong>
+                  </button>
+                  </template>
+
+                  <template v-else-if="column.key === 'title'">
+                  <input
+                    v-if="isInlineEditing(story, 'title')"
+                    v-model="inlineEdit.value"
+                    class="archive-inline-input"
+                    placeholder="Nhập tiêu đề"
+                    autofocus
+                    @click.stop
+                    @keydown.enter.prevent="saveInlineEdit(story)"
+                    @keydown.esc.prevent="cancelInlineEdit"
+                    @blur="saveInlineEdit(story)"
+                  />
+                  <button
+                    v-else
+                    class="archive-inline-value"
+                    type="button"
+                    :disabled="!canEditStoryMetadata(story)"
+                    :title="canEditStoryMetadata(story) ? 'Sửa tiêu đề' : mutationDeniedMessage(story)"
+                    @click.stop="startInlineEdit(story, 'title', story.title || '')"
+                  >
+                    <strong>{{ story.title || 'Chưa có tiêu đề' }}</strong>
+                    <small v-if="story.extraNote">{{ story.extraNote }}</small>
+                  </button>
+                  </template>
+
+                  <template v-else-if="column.key === 'extraNote'">
+                  <input
+                    v-if="isInlineEditing(story, 'extraNote')"
+                    v-model="inlineEdit.value"
+                    class="archive-inline-input"
+                    placeholder="Nhap ghi chu"
+                    autofocus
+                    @click.stop
+                    @keydown.enter.prevent="saveInlineEdit(story)"
+                    @keydown.esc.prevent="cancelInlineEdit"
+                    @blur="saveInlineEdit(story)"
+                  />
+                  <button
+                    v-else
+                    class="archive-inline-value"
+                    type="button"
+                    :disabled="!canEditStoryMetadata(story)"
+                    :title="canEditStoryMetadata(story) ? 'Sua ghi chu khac' : mutationDeniedMessage(story)"
+                    @click.stop="startInlineEdit(story, 'extraNote', story.extraNote || '')"
+                  >
+                    <span>{{ story.extraNote || 'Chua co ghi chu' }}</span>
+                  </button>
+                  </template>
+
+                  <template v-else-if="column.key === 'customer'">
+                  <strong>{{ story.customerNameSnapshot || story.conversationName }}</strong>
+                  <small>{{ story.contactPhone || 'Không có SĐT' }}</small>
+                  <small v-if="accountDisplayName(story)">Nick: {{ accountDisplayName(story) }}</small>
+                  </template>
+
+                  <template v-else-if="column.key === 'receivedAt'">
                   <strong>{{ formatDate(story.receivedAt || firstMessageAt(story) || story.createdAt) }}</strong>
                   <small>Tin đầu tiên</small>
-                </td>
-                <td>
+                  </template>
+
+                  <template v-else-if="column.key === 'priority'">
+                  <v-select
+                    v-if="isInlineEditing(story, 'priority')"
+                    v-model="inlineEdit.value"
+                    :items="priorityEditOptions"
+                    class="archive-inline-select"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    autofocus
+                    @click.stop
+                    @update:model-value="saveInlineEdit(story)"
+                  />
+                  <button
+                    v-else
+                    class="archive-inline-value"
+                    type="button"
+                    :disabled="!canEditStoryMetadata(story)"
+                    :title="canEditStoryMetadata(story) ? 'Sửa mức độ ưu tiên' : mutationDeniedMessage(story)"
+                    @click.stop="startInlineEdit(story, 'priority', story.priority || 'normal')"
+                  >
+                    <span class="priority-pill" :class="`priority-${story.priority || 'normal'}`">
+                      {{ priorityLabel(story.priority) }}
+                    </span>
+                  </button>
+                  </template>
+
+                  <template v-else-if="column.key === 'requiresConfirmation'">
+                    <span class="archive-inline-value archive-inline-value--readonly">
+                      {{ confirmationLabel(story.requiresConfirmation) }}
+                    </span>
+                  </template>
+
+                  <template v-else-if="column.key === 'lastMessage'">
                   <p class="last-message">{{ lastMessagePreview(story) }}</p>
                   <div class="table-message-meta">
                     <span><v-icon size="14">mdi-message-text-outline</v-icon>{{ story.messages.length }}</span>
@@ -244,9 +386,13 @@
                     </span>
                     <span>{{ formatDate(story.updatedAt) }}</span>
                   </div>
-                </td>
-                <td>{{ story.department?.name || 'Chưa có phòng ban' }}</td>
-                <td>
+                  </template>
+
+                  <template v-else-if="column.key === 'department'">
+                    {{ story.department?.name || 'Chưa có phòng ban' }}
+                  </template>
+
+                  <template v-else-if="column.key === 'assignee'">
                   {{ storyAssigneeLabel(story) }}
                   <span v-if="pendingHandoverLabel(story)" class="handover-inline-chip">
                     <v-icon size="13">mdi-account-arrow-right-outline</v-icon>
@@ -264,13 +410,15 @@
                     <v-icon size="14">mdi-account-off-outline</v-icon>
                     Tài khoản Zalo đã bị xóa
                   </span>
-                </td>
-                <td>
+                  </template>
+
+                  <template v-else-if="column.key === 'status'">
                   <span class="status-pill" :style="statusPillStyle(storyStatus(story))">
                     {{ storyStatus(story).name }}
                   </span>
-                </td>
-                <td class="action-column">
+                  </template>
+
+                  <template v-else-if="column.key === 'actions'">
                   <v-menu location="bottom end">
                     <template #activator="{ props }">
                       <button v-bind="props" class="table-action-btn" title="Chuyển trạng thái" @click.stop>
@@ -307,6 +455,7 @@
                       <v-list-item title="Xem chi tiết" prepend-icon="mdi-eye-outline" @click="openDetail(story)" />
                     </v-list>
                   </v-menu>
+                  </template>
                 </td>
               </tr>
             </tbody>
@@ -999,6 +1148,62 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="archiveColumnDialog" max-width="560" transition="archive-dialog-transition">
+      <v-card rounded="xl" class="archive-column-dialog">
+        <v-card-title>Cấu hình cột hiển thị</v-card-title>
+        <v-card-subtitle>
+          Kéo thả để đổi thứ tự. Cột thao tác luôn được giữ để mở chi tiết và chuyển trạng thái.
+        </v-card-subtitle>
+        <v-card-text>
+          <div class="archive-column-config-list">
+            <div
+              v-for="(column, index) in archiveColumnRows"
+              :key="column.key"
+              class="archive-column-config-row"
+              draggable="true"
+              @dragstart="startArchiveColumnDrag(column.key)"
+              @dragend="draggingArchiveColumnKey = null"
+              @dragover.prevent
+              @drop="dropArchiveColumn(column.key)"
+            >
+              <v-icon class="archive-column-drag-icon" size="18">mdi-drag-horizontal-variant</v-icon>
+              <v-switch
+                :model-value="column.visible || column.definition.required"
+                color="primary"
+                density="compact"
+                hide-details
+                :disabled="column.definition.required"
+                @update:model-value="setArchiveColumnVisible(column.key, Boolean($event))"
+              />
+              <span class="archive-column-config-label">{{ column.definition.label }}</span>
+              <span v-if="column.definition.required" class="archive-column-required">Bắt buộc</span>
+              <div class="archive-column-config-actions">
+                <v-btn
+                  icon="mdi-chevron-up"
+                  size="x-small"
+                  variant="text"
+                  :disabled="index === 0"
+                  @click="moveArchiveColumn(index, index - 1)"
+                />
+                <v-btn
+                  icon="mdi-chevron-down"
+                  size="x-small"
+                  variant="text"
+                  :disabled="index === archiveColumnRows.length - 1"
+                  @click="moveArchiveColumn(index, index + 1)"
+                />
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" @click="resetArchiveColumns">Khôi phục mặc định</v-btn>
+          <v-spacer />
+          <v-btn color="primary" variant="flat" @click="archiveColumnDialog = false">Đóng</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <div
       v-if="messageContextMenu.visible"
       class="archive-message-context-menu"
@@ -1018,7 +1223,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { resolveAttachmentUrl } from '@/utils/attachment-url';
 import { downloadAttachment } from '@/utils/download-attachment';
 import { api } from '@/api/index';
@@ -1109,6 +1314,12 @@ interface ArchiveStory {
   createdByUserId: string;
   conversationId: string;
   title?: string | null;
+  orderCode?: string | null;
+  priority?: 'low' | 'normal' | 'high' | 'urgent' | string | null;
+  requiresConfirmation?: boolean | null;
+  extraNote?: string | null;
+  customerId?: string | null;
+  customerNameSnapshot?: string | null;
   recordType: string;
   conversationName: string;
   contactPhone?: string | null;
@@ -1184,6 +1395,8 @@ interface CustomerOption {
   subtitle: string;
 }
 
+type InlineEditableArchiveField = 'orderCode' | 'title' | 'priority' | 'extraNote';
+
 const toast = useToast();
 const authStore = useAuthStore();
 const route = useRoute();
@@ -1201,6 +1414,63 @@ const statusSaving = ref(false);
 const titleEditing = ref(false);
 const titleSaving = ref(false);
 const titleDraft = ref('');
+const inlineEdit = ref<{
+  storyId: string;
+  field: InlineEditableArchiveField | '';
+  value: string;
+  saving: boolean;
+}>({
+  storyId: '',
+  field: '',
+  value: '',
+  saving: false,
+});
+
+type ArchiveTableColumnKey =
+  | 'orderCode'
+  | 'title'
+  | 'customer'
+  | 'receivedAt'
+  | 'priority'
+  | 'requiresConfirmation'
+  | 'extraNote'
+  | 'lastMessage'
+  | 'department'
+  | 'assignee'
+  | 'status'
+  | 'actions';
+
+interface ArchiveTableColumnDefinition {
+  key: ArchiveTableColumnKey;
+  label: string;
+  className: string;
+  required?: boolean;
+}
+
+interface ArchiveTableColumnPreference {
+  key: ArchiveTableColumnKey;
+  visible: boolean;
+  order: number;
+}
+
+const archiveTableColumnDefinitions: ArchiveTableColumnDefinition[] = [
+  { key: 'extraNote', label: 'Ghi chu khac', className: 'archive-column-extra-note' },
+  { key: 'orderCode', label: 'Đơn hàng', className: 'archive-column-order-code' },
+  { key: 'title', label: 'Tiêu đề', className: 'archive-column-title' },
+  { key: 'customer', label: 'Khách hàng', className: 'archive-column-customer' },
+  { key: 'receivedAt', label: 'Ngày/Giờ nhận', className: 'archive-column-received-at' },
+  { key: 'priority', label: 'Ưu tiên', className: 'archive-column-priority' },
+  { key: 'requiresConfirmation', label: 'Cần xác nhận', className: 'archive-column-confirmation' },
+  { key: 'lastMessage', label: 'Tin nhắn cuối', className: 'archive-column-last-message message-column' },
+  { key: 'department', label: 'Phòng ban', className: 'archive-column-department' },
+  { key: 'assignee', label: 'Nhân viên', className: 'archive-column-assignee' },
+  { key: 'status', label: 'Trạng thái', className: 'archive-column-status' },
+  { key: 'actions', label: 'Thao tác', className: 'archive-column-actions action-column', required: true },
+];
+
+const archiveColumnDialog = ref(false);
+const draggingArchiveColumnKey = ref<ArchiveTableColumnKey | null>(null);
+const archiveColumnPrefs = ref<ArchiveTableColumnPreference[]>([]);
 const selectedMessageIds = ref<string[]>([]);
 const messageRemoving = ref(false);
 const handoverContext = ref<ArchiveHandoverContext | null>(null);
@@ -1245,6 +1515,8 @@ const filters = ref({
   departmentId: '',
   assignedUserId: assignedUserDefaultId.value || '__all__',
   recordType: '',
+  priority: '',
+  requiresConfirmation: '',
   recallState: '',
 });
 const pagination = ref({ page: 1, limit: 20 });
@@ -1290,6 +1562,21 @@ const recordTypeOptions = [
   { title: 'Chăm sóc khách hàng', value: 'customer_care' },
   { title: 'Hồ sơ khác', value: 'other' },
 ];
+const defaultPriorityOptions = [
+  { title: 'Tất cả mức độ', value: '' },
+  { title: 'Thấp', value: 'low' },
+  { title: 'Bình thường', value: 'normal' },
+  { title: 'Ưu tiên', value: 'high' },
+  { title: 'Gấp', value: 'urgent' },
+];
+const priorityOptions = ref([...defaultPriorityOptions]);
+const confirmationOptions = [
+  { title: 'Tất cả xác nhận', value: '' },
+  { title: 'Có', value: 'true' },
+  { title: 'Không', value: 'false' },
+  { title: 'Chưa xác định', value: 'unknown' },
+];
+const priorityEditOptions = computed(() => priorityOptions.value.filter((item) => item.value));
 const statusOptions = computed(() => [
   { label: 'Tất cả', value: '' },
   ...statusDefinitions.value
@@ -1305,6 +1592,133 @@ const pendingCount = computed(() => statusDefinitions.value
   .reduce((sum, status) => sum + (statusCounts.value[status.id] || 0), 0));
 const failedCount = computed(() => stories.value.filter((item) => ['failed', 'partial'].includes(item.backupStatus)).length);
 const canConfigure = computed(() => ['owner', 'admin'].includes(authStore.user?.role || ''));
+const archiveColumnDefinitionMap = computed(() => new Map(
+  archiveTableColumnDefinitions.map((column) => [column.key, column]),
+));
+const archiveColumnRows = computed(() => normalizeArchiveColumnPrefs(archiveColumnPrefs.value).map((pref) => ({
+  ...pref,
+  definition: archiveColumnDefinitionMap.value.get(pref.key)!,
+})));
+const visibleArchiveColumns = computed(() => archiveColumnRows.value
+  .filter((pref) => pref.visible || pref.definition.required)
+  .map((pref) => pref.definition));
+
+function archiveColumnStorageKey() {
+  return `archive-table-columns:${authStore.user?.id || 'default'}`;
+}
+
+function defaultArchiveColumnPrefs(): ArchiveTableColumnPreference[] {
+  return archiveTableColumnDefinitions.map((column, index) => ({
+    key: column.key,
+    visible: true,
+    order: index,
+  }));
+}
+
+function normalizeArchiveColumnPrefs(input?: ArchiveTableColumnPreference[] | null) {
+  const byKey = new Map((Array.isArray(input) ? input : [])
+    .filter((pref) => archiveTableColumnDefinitions.some((column) => column.key === pref.key))
+    .map((pref) => [pref.key, pref]));
+  return archiveTableColumnDefinitions
+    .map((column, index) => {
+      const saved = byKey.get(column.key);
+      return {
+        key: column.key,
+        visible: column.required ? true : saved?.visible ?? true,
+        order: Number.isFinite(saved?.order) ? Number(saved?.order) : index,
+      };
+    })
+    .sort((left, right) => left.order - right.order)
+    .map((pref, index) => ({ ...pref, order: index }));
+}
+
+async function loadArchiveColumnPrefs() {
+  try {
+    const { data } = await api.get('/archive/table-column-prefs');
+    if (Array.isArray(data.columns) && data.columns.length > 0) {
+      archiveColumnPrefs.value = normalizeArchiveColumnPrefs(data.columns);
+      return;
+    }
+    const raw = localStorage.getItem(archiveColumnStorageKey());
+    archiveColumnPrefs.value = normalizeArchiveColumnPrefs(raw ? JSON.parse(raw) : null);
+  } catch {
+    try {
+      const raw = localStorage.getItem(archiveColumnStorageKey());
+      archiveColumnPrefs.value = normalizeArchiveColumnPrefs(raw ? JSON.parse(raw) : null);
+    } catch {
+      archiveColumnPrefs.value = defaultArchiveColumnPrefs();
+    }
+  }
+}
+
+async function loadPriorityOptions() {
+  try {
+    const { data } = await api.get('/archive/priority-options');
+    const options = Array.isArray(data.options)
+      ? data.options
+        .filter((item: any) => item?.isActive !== false && item?.key && item?.label)
+        .sort((left: any, right: any) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0))
+        .map((item: any) => ({ title: String(item.label), value: String(item.key) }))
+      : [];
+    priorityOptions.value = [
+      defaultPriorityOptions[0],
+      ...(options.length ? options : defaultPriorityOptions.slice(1)),
+    ];
+  } catch {
+    priorityOptions.value = [...defaultPriorityOptions];
+  }
+}
+
+function persistArchiveColumnPrefs() {
+  archiveColumnPrefs.value = normalizeArchiveColumnPrefs(archiveColumnPrefs.value);
+  localStorage.setItem(archiveColumnStorageKey(), JSON.stringify(archiveColumnPrefs.value));
+  void api.put('/archive/table-column-prefs', { columns: archiveColumnPrefs.value }).catch(() => {
+    toast.error('Không thể lưu cấu hình cột lên server');
+  });
+}
+
+function openArchiveColumnDialog() {
+  archiveColumnPrefs.value = normalizeArchiveColumnPrefs(archiveColumnPrefs.value);
+  archiveColumnDialog.value = true;
+}
+
+function resetArchiveColumns() {
+  archiveColumnPrefs.value = defaultArchiveColumnPrefs();
+  persistArchiveColumnPrefs();
+}
+
+function setArchiveColumnVisible(key: ArchiveTableColumnKey, visible: boolean) {
+  const definition = archiveColumnDefinitionMap.value.get(key);
+  archiveColumnPrefs.value = normalizeArchiveColumnPrefs(archiveColumnPrefs.value).map((pref) => (
+    pref.key === key ? { ...pref, visible: definition?.required ? true : visible } : pref
+  ));
+  persistArchiveColumnPrefs();
+}
+
+function moveArchiveColumn(fromIndex: number, toIndex: number) {
+  const ordered = normalizeArchiveColumnPrefs(archiveColumnPrefs.value);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= ordered.length || toIndex >= ordered.length) return;
+  const [moved] = ordered.splice(fromIndex, 1);
+  ordered.splice(toIndex, 0, moved);
+  archiveColumnPrefs.value = ordered.map((pref, index) => ({ ...pref, order: index }));
+  persistArchiveColumnPrefs();
+}
+
+function startArchiveColumnDrag(key: ArchiveTableColumnKey) {
+  draggingArchiveColumnKey.value = key;
+}
+
+function dropArchiveColumn(targetKey: ArchiveTableColumnKey) {
+  const draggedKey = draggingArchiveColumnKey.value;
+  draggingArchiveColumnKey.value = null;
+  if (!draggedKey || draggedKey === targetKey) return;
+  const ordered = normalizeArchiveColumnPrefs(archiveColumnPrefs.value);
+  const fromIndex = ordered.findIndex((pref) => pref.key === draggedKey);
+  const toIndex = ordered.findIndex((pref) => pref.key === targetKey);
+  moveArchiveColumn(fromIndex, toIndex);
+}
+
+archiveColumnPrefs.value = defaultArchiveColumnPrefs();
 
 function statusTabCount(option: { value: string; status?: ArchiveStatusDefinition; system?: 'handover' }) {
   if (option.system === 'handover') return handoverInboxCount.value;
@@ -1475,6 +1889,57 @@ function mutationDeniedMessage(story: ArchiveStory) {
   return story.permissions?.reason || 'Bạn không có quyền thao tác hồ sơ này';
 }
 
+function isInlineEditing(story: ArchiveStory, field: InlineEditableArchiveField) {
+  return inlineEdit.value.storyId === story.id && inlineEdit.value.field === field;
+}
+
+function startInlineEdit(story: ArchiveStory, field: InlineEditableArchiveField, value: string) {
+  if (!canEditStoryMetadata(story)) {
+    toast.error(mutationDeniedMessage(story));
+    return;
+  }
+  inlineEdit.value = {
+    storyId: story.id,
+    field,
+    value,
+    saving: false,
+  };
+}
+
+function cancelInlineEdit() {
+  if (inlineEdit.value.saving) return;
+  inlineEdit.value = { storyId: '', field: '', value: '', saving: false };
+}
+
+function normalizeInlinePayload(field: InlineEditableArchiveField, value: string) {
+  if (field === 'priority') {
+    return { priority: value || 'normal' };
+  }
+  return { [field]: value.trim() || null };
+}
+
+async function saveInlineEdit(story: ArchiveStory) {
+  const state = inlineEdit.value;
+  if (state.saving || state.storyId !== story.id || !state.field) return;
+  const field = state.field;
+  const currentValue = String((story as any)[field] ?? '');
+  if (state.value === currentValue) {
+    cancelInlineEdit();
+    return;
+  }
+  inlineEdit.value.saving = true;
+  try {
+    const { data } = await api.patch(`/archive/stories/${story.id}`, normalizeInlinePayload(field, state.value));
+    replaceStory(data.story);
+    if (selectedStory.value?.id === story.id) selectedStory.value = data.story;
+    inlineEdit.value = { storyId: '', field: '', value: '', saving: false };
+    toast.success('Đã cập nhật hồ sơ');
+  } catch (error: any) {
+    inlineEdit.value.saving = false;
+    toast.error(error?.response?.data?.error || 'Không thể cập nhật hồ sơ');
+  }
+}
+
 async function fetchStories() {
   loading.value = true;
   kanbanLoadError.value = '';
@@ -1497,6 +1962,8 @@ async function fetchStories() {
           ? undefined
           : filters.value.assignedUserId || undefined,
         recordType: filters.value.recordType || undefined,
+        priority: filters.value.priority || undefined,
+        requiresConfirmation: filters.value.requiresConfirmation || undefined,
         recallState: filters.value.recallState || undefined,
       },
     });
@@ -1545,6 +2012,8 @@ function resetFilters() {
   filters.value.status = '';
   filters.value.recallState = '';
   filters.value.recordType = '';
+  filters.value.priority = '';
+  filters.value.requiresConfirmation = '';
   filters.value.conversationId = '';
   filters.value.customerQ = '';
   customerSearch.value = '';
@@ -1828,7 +2297,7 @@ function openDetail(story: ArchiveStory) {
   selectedMessageIds.value = [];
   closeMessageContextMenu();
   titleEditing.value = false;
-  titleDraft.value = extractTitleSuffix(story);
+  titleDraft.value = story.title || '';
   statusForm.value = {
     statusDefinitionId: storyStatus(story).id,
     resultContent: story.resultContent || '',
@@ -2060,7 +2529,7 @@ async function removeSelectedMessages() {
 
 function startTitleEdit() {
   if (!selectedStory.value || !canEditSelectedStoryTitle.value) return;
-  titleDraft.value = extractTitleSuffix(selectedStory.value);
+  titleDraft.value = selectedStory.value.title || '';
   titleEditing.value = true;
 }
 
@@ -2070,10 +2539,10 @@ function cancelTitleEdit() {
 
 async function saveTitle() {
   if (!selectedStory.value || !canEditSelectedStoryTitle.value) return;
-  const titleSuffix = titleDraft.value.trim();
+  const title = titleDraft.value.trim();
   titleSaving.value = true;
   try {
-    const { data } = await api.patch(`/archive/stories/${selectedStory.value.id}`, { titleSuffix });
+    const { data } = await api.patch(`/archive/stories/${selectedStory.value.id}`, { title });
     replaceStory(data.story);
     selectedStory.value = data.story;
     titleEditing.value = false;
@@ -2085,20 +2554,16 @@ async function saveTitle() {
   }
 }
 
-function extractTitleSuffix(story: ArchiveStory) {
-  const title = (story.title || '').trim();
-  const baseName = (story.conversationName || '').trim();
-  if (!title || title === baseName) return '';
-  const prefix = `${baseName} - `;
-  return title.startsWith(prefix) ? title.slice(prefix.length).trim() : title;
-}
-
 async function openStoryFromNotification() {
   const storyId = typeof route.query.storyId === 'string' ? route.query.storyId : '';
+  const messageId = typeof route.query.messageId === 'string' ? route.query.messageId : '';
   if (!storyId) return;
   try {
     const { data } = await api.get(`/archive/stories/${storyId}`);
     openDetail(data);
+    if (messageId) {
+      void focusArchiveTimelineMessageWhenReady(messageId);
+    }
   } catch (error: any) {
     toast.error(error?.response?.data?.error || 'Không thể mở hồ sơ từ thông báo');
   }
@@ -2239,6 +2704,15 @@ function focusArchiveTimelineMessage(archiveMessageId: string) {
   element.classList.add('archive-message-focus-highlight');
   window.setTimeout(() => element.classList.remove('archive-message-focus-highlight'), 3200);
   return true;
+}
+
+async function focusArchiveTimelineMessageWhenReady(archiveMessageId: string) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    await nextTick();
+    if (focusArchiveTimelineMessage(archiveMessageId)) return true;
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+  }
+  return false;
 }
 
 async function openArchiveReplyTarget(message: ArchiveMessage) {
@@ -2553,6 +3027,17 @@ function recordTypeLabel(value: string) {
   } as Record<string, string>)[value] || value.toUpperCase();
 }
 
+function priorityLabel(value?: string | null) {
+  const key = value || 'normal';
+  return priorityOptions.value.find((item) => item.value === key)?.title || key;
+}
+
+function confirmationLabel(value?: boolean | null) {
+  if (value === true) return 'Có';
+  if (value === false) return 'Không';
+  return 'Chưa cài đặt';
+}
+
 function storyStatus(story: ArchiveStory): ArchiveStatusDefinition {
   if (story.statusDefinition) return story.statusDefinition;
   const fallbackCode = story.businessStatus === 'completed'
@@ -2695,6 +3180,8 @@ function formatCompactDate(value: string) {
 onMounted(async () => {
   window.addEventListener('click', closeMessageContextMenu);
   window.addEventListener('scroll', closeMessageContextMenu, true);
+  await loadArchiveColumnPrefs();
+  await loadPriorityOptions();
   await loadFilterContext();
   await fetchStatusDefinitions();
   await fetchStories();
@@ -2707,9 +3194,11 @@ onUnmounted(() => {
 });
 
 watch(
-  () => route.query.storyId,
-  (storyId, previousStoryId) => {
-    if (storyId && storyId !== previousStoryId) void openStoryFromNotification();
+  () => [route.query.storyId, route.query.messageId, route.query.openAt],
+  ([storyId, messageId, openAt], [previousStoryId, previousMessageId, previousOpenAt]) => {
+    if (storyId && (storyId !== previousStoryId || messageId !== previousMessageId || openAt !== previousOpenAt)) {
+      void openStoryFromNotification();
+    }
   },
 );
 
@@ -4818,6 +5307,36 @@ footer {
     line-height: 16px;
   }
 
+  .priority-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid #d6dbea;
+    color: #445064;
+    background: #f3f6fb;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .priority-high {
+    border-color: #fed7aa;
+    color: #c2410c;
+    background: #fff7ed;
+  }
+
+  .priority-urgent {
+    border-color: #fecaca;
+    color: #b91c1c;
+    background: #fef2f2;
+  }
+
+  .priority-low {
+    color: #475569;
+    background: #f8fafc;
+  }
+
   .view-list .story-conversation {
     border-right-color: #c3c6d7;
     background: rgba(247, 249, 251, .5);
@@ -5531,14 +6050,63 @@ footer {
   border-bottom: 0;
 }
 
-.archive-table th:nth-child(1) { width: 15%; }
-.archive-table th:nth-child(2) { width: 12%; }
-.archive-table th:nth-child(3) { width: 12%; }
-.archive-table th:nth-child(4) { width: 28%; }
-.archive-table th:nth-child(5) { width: 13%; }
-.archive-table th:nth-child(6) { width: 12%; }
-.archive-table th:nth-child(7) { width: 8%; }
-.archive-table th:nth-child(8) { width: 64px; }
+.archive-column-order-code { width: 11%; }
+.archive-column-title { width: 12%; }
+.archive-column-customer { width: 12%; }
+.archive-column-received-at { width: 10%; }
+.archive-column-priority { width: 8%; }
+.archive-column-confirmation { width: 8%; }
+.archive-column-extra-note { width: 10%; }
+.archive-column-last-message { width: 22%; }
+.archive-column-department { width: 10%; }
+.archive-column-assignee { width: 11%; }
+.archive-column-status { width: 8%; }
+.archive-column-actions {
+  width: 64px;
+  text-align: center;
+}
+
+.archive-inline-value {
+  display: block;
+  width: 100%;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.archive-inline-value:disabled {
+  cursor: default;
+}
+
+.archive-inline-value strong,
+.archive-inline-value small {
+  display: block;
+}
+
+.archive-inline-input {
+  width: 100%;
+  height: 32px;
+  padding: 5px 8px;
+  border: 1px solid #9fb4d8;
+  border-radius: 7px;
+  outline: none;
+  background: #fff;
+  font-size: 12px;
+}
+
+.archive-inline-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, .12);
+}
+
+.archive-inline-select {
+  min-width: 118px;
+}
 
 .archive-table td > strong,
 .archive-table td small {
@@ -6937,6 +7505,67 @@ footer {
 .archive-kanban-skeleton span:nth-child(3) { width: 100%; height: 42px; border-radius: 5px; }
 .archive-kanban-skeleton span:nth-child(4) { width: 62%; }
 
+.archive-column-dialog :deep(.v-card-title) {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.archive-column-config-list {
+  display: grid;
+  gap: 8px;
+}
+
+.archive-column-config-row {
+  display: grid;
+  align-items: center;
+  min-height: 48px;
+  padding: 6px 8px;
+  grid-template-columns: 28px 48px minmax(0, 1fr) auto auto;
+  gap: 8px;
+  border: 1px solid #d8deea;
+  border-radius: 10px;
+  background: #fff;
+  cursor: grab;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.archive-column-config-row:hover {
+  border-color: #9fb4d8;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .08);
+}
+
+.archive-column-config-row:active {
+  cursor: grabbing;
+  transform: scale(.995);
+}
+
+.archive-column-drag-icon {
+  color: #64748b;
+}
+
+.archive-column-config-label {
+  overflow: hidden;
+  color: #111827;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-column-required {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.archive-column-config-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
 @keyframes archive-kanban-pulse {
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
@@ -7037,3 +7666,4 @@ footer {
   }
 }
 </style>
+

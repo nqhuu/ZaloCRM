@@ -91,9 +91,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { io, type Socket } from 'socket.io-client';
 import { api } from '@/api/index';
+import { useAuthStore } from '@/stores/auth';
 
 type NotificationTab = 'all' | 'unread' | 'ack';
 
@@ -123,12 +125,16 @@ interface Notification {
 }
 
 const router = useRouter();
+const authStore = useAuthStore();
 const notifications = ref<Notification[]>([]);
 const badgeCount = ref(0);
 const ackRequiredCount = ref(0);
 const activeTab = ref<NotificationTab>('all');
 const menuOpen = ref(false);
-let interval: ReturnType<typeof setInterval>;
+let interval: ReturnType<typeof setInterval> | null = null;
+let notificationSocket: Socket | null = null;
+let realtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let notificationSocketOrgId: string | null = null;
 
 const filteredNotifications = computed(() => {
   if (activeTab.value === 'unread') return notifications.value.filter(isUnread);
@@ -188,6 +194,55 @@ async function fetchNotifications() {
   }
 }
 
+function eventTargetsCurrentUser(event: any) {
+  const currentUser = authStore.user;
+  if (!currentUser) return false;
+  if (event?.orgId && event.orgId !== currentUser.orgId) return false;
+  if (event?.userId && event.userId !== currentUser.id) return false;
+  return true;
+}
+
+function scheduleRealtimeRefresh() {
+  if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+  realtimeRefreshTimer = setTimeout(() => {
+    realtimeRefreshTimer = null;
+    void fetchNotifications();
+  }, 150);
+}
+
+function setupNotificationSocket() {
+  const orgId = authStore.user?.orgId;
+  if (!orgId || notificationSocket) return;
+
+  notificationSocket = io({ transports: ['websocket', 'polling'] });
+  notificationSocketOrgId = orgId;
+  const joinOrg = () => notificationSocket?.emit('org:join', { orgId });
+  const onNotificationChange = (event: any) => {
+    if (eventTargetsCurrentUser(event)) scheduleRealtimeRefresh();
+  };
+
+  notificationSocket.on('connect', joinOrg);
+  notificationSocket.on('notification:new', onNotificationChange);
+  notificationSocket.on('notification:updated', onNotificationChange);
+  notificationSocket.on('notification:count', onNotificationChange);
+
+  if (notificationSocket.connected) joinOrg();
+}
+
+function teardownNotificationSocket() {
+  if (realtimeRefreshTimer) {
+    clearTimeout(realtimeRefreshTimer);
+    realtimeRefreshTimer = null;
+  }
+  notificationSocket?.removeAllListeners('connect');
+  notificationSocket?.removeAllListeners('notification:new');
+  notificationSocket?.removeAllListeners('notification:updated');
+  notificationSocket?.removeAllListeners('notification:count');
+  notificationSocket?.disconnect();
+  notificationSocket = null;
+  notificationSocketOrgId = null;
+}
+
 async function markSeen() {
   const targets = notifications.value.filter((n) => n.id.startsWith('archive-') && !n.seenAt);
   await Promise.allSettled(targets.map((n) => api.patch(`/notifications/${n.id}/seen`)));
@@ -240,7 +295,19 @@ async function handleClick(n: Notification) {
     // Navigation should still work for computed notifications.
   }
   const path = n.action?.path;
-  if (path) router.push(path);
+  if (path) {
+    const targetPath = n.action?.kind?.startsWith('open_archive') && n.action.storyId
+      ? {
+          path: '/archive',
+          query: {
+            storyId: n.action.storyId,
+            messageId: n.action.messageId || undefined,
+            openAt: String(Date.now()),
+          },
+        }
+      : path;
+    router.push(targetPath);
+  }
   else if (n.id.includes('unreplied')) router.push('/chat');
   else if (n.id.includes('apt')) router.push('/appointments');
   else if (n.id.includes('zalo')) router.push('/zalo-accounts');
@@ -248,10 +315,29 @@ async function handleClick(n: Notification) {
 
 onMounted(() => {
   fetchNotifications();
+  setupNotificationSocket();
   interval = setInterval(fetchNotifications, 30000);
 });
 
-onUnmounted(() => clearInterval(interval));
+watch(
+  () => authStore.user?.orgId,
+  (orgId) => {
+    if (!orgId) {
+      teardownNotificationSocket();
+      return;
+    }
+    if (notificationSocketOrgId && notificationSocketOrgId !== orgId) {
+      teardownNotificationSocket();
+    }
+    setupNotificationSocket();
+    void fetchNotifications();
+  },
+);
+
+onUnmounted(() => {
+  if (interval) clearInterval(interval);
+  teardownNotificationSocket();
+});
 </script>
 
 <style scoped>

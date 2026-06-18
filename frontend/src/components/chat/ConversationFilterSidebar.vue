@@ -161,22 +161,57 @@
                 {{ tag.name }}
               </button>
             </div>
-            <div v-if="filteredZaloTags.length > 0" class="po-sub-label">
+            <div v-if="filteredZaloTags.length > 0 || nativeZaloLabelsLoaded" class="po-sub-label row-label">
               Tag Zalo native ({{ zaloTagsList.length }})
               <span v-if="filters.state.tagsZalo.length > 0" class="sub-selected">· {{ filters.state.tagsZalo.length }} đã chọn</span>
-            </div>
-            <div v-if="filteredZaloTags.length > 0" class="tag-pill-row scroll">
               <button
-                v-for="tag in filteredZaloTags"
-                :key="`zalo-${tag.id}`"
                 type="button"
-                class="tag-pill zalo"
-                :class="{ selected: filters.state.tagsZalo.includes(displayTagName(tag.name)) }"
-                @click="toggleZaloTag(displayTagName(tag.name))"
+                class="sync-label-btn"
+                :disabled="syncingNativeLabels || syncableAccountIds.length === 0"
+                :title="syncNativeLabelTitle"
+                @click.stop="syncNativeZaloLabels"
               >
-                <span class="zalo-dot"></span>
-                {{ displayTagName(tag.name) }}
+                {{ syncingNativeLabels ? 'Đang đồng bộ...' : 'Đồng bộ' }}
               </button>
+            </div>
+            <div v-if="nativeZaloSelectedCount > 1" class="zalo-label-mode">
+              <button
+                type="button"
+                :class="{ active: filters.state.zaloLabelMode !== 'and' }"
+                title="Hiển thị hội thoại có ít nhất một tag đã chọn"
+                @click="setZaloLabelMode('or')"
+              >Bất kỳ tag</button>
+              <button
+                type="button"
+                :class="{ active: filters.state.zaloLabelMode === 'and' }"
+                title="Chỉ hiển thị hội thoại có đủ tất cả tag đã chọn"
+                @click="setZaloLabelMode('and')"
+              >Tất cả tag</button>
+            </div>
+            <div v-if="filteredZaloTags.length > 0" class="zalo-native-groups">
+              <div
+                v-for="group in filteredZaloTagGroups"
+                :key="`zalo-group-${group.accountId || 'legacy'}`"
+                class="zalo-native-group"
+              >
+                <div v-if="showZaloTagAccountGroups" class="zalo-native-account">{{ group.accountName }}</div>
+                <div class="tag-pill-row scroll">
+                  <button
+                    v-for="tag in group.tags"
+                    :key="`zalo-${tag.id}`"
+                    type="button"
+                    class="tag-pill zalo"
+                    :class="{ selected: filters.state.tagsZalo.includes(tag.value) }"
+                    :title="tag.accountName ? `${tag.name} · ${tag.accountName}` : tag.name"
+                    @click="toggleZaloTag(tag.value)"
+                  >
+                    <span class="zalo-dot" :style="{ background: tag.color || '#0068ff' }"></span>
+                    <span v-if="tag.emoji">{{ tag.emoji }}</span>
+                    {{ tag.name }}
+                    <span v-if="tag.assignedCount !== undefined" class="tag-count">{{ tag.assignedCount }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="po-sub-label">Auto-tag</div>
             <div class="tag-pill-row">
@@ -426,22 +461,57 @@
               </button>
             </div>
 
-            <div v-if="filteredZaloTags.length > 0" class="subsection-label">
+            <div v-if="filteredZaloTags.length > 0 || nativeZaloLabelsLoaded" class="subsection-label row-label">
               Tag Zalo native ({{ zaloTagsList.length }})
               <span v-if="filters.state.tagsZalo.length > 0" class="sub-selected">· {{ filters.state.tagsZalo.length }} đã chọn</span>
-            </div>
-            <div v-if="filteredZaloTags.length > 0" class="tag-pill-row scroll">
               <button
-                v-for="tag in filteredZaloTags"
-                :key="`zalo-${tag.id}`"
                 type="button"
-                class="tag-pill zalo"
-                :class="{ selected: filters.state.tagsZalo.includes(displayTagName(tag.name)) }"
-                @click="toggleZaloTag(displayTagName(tag.name))"
+                class="sync-label-btn"
+                :disabled="syncingNativeLabels || syncableAccountIds.length === 0"
+                :title="syncNativeLabelTitle"
+                @click.stop="syncNativeZaloLabels"
               >
-                <span class="zalo-dot"></span>
-                {{ displayTagName(tag.name) }}
+                {{ syncingNativeLabels ? 'Đang đồng bộ...' : 'Đồng bộ' }}
               </button>
+            </div>
+            <div v-if="nativeZaloSelectedCount > 1" class="zalo-label-mode">
+              <button
+                type="button"
+                :class="{ active: filters.state.zaloLabelMode !== 'and' }"
+                title="Hiển thị hội thoại có ít nhất một tag đã chọn"
+                @click="setZaloLabelMode('or')"
+              >Bất kỳ tag</button>
+              <button
+                type="button"
+                :class="{ active: filters.state.zaloLabelMode === 'and' }"
+                title="Chỉ hiển thị hội thoại có đủ tất cả tag đã chọn"
+                @click="setZaloLabelMode('and')"
+              >Tất cả tag</button>
+            </div>
+            <div v-if="filteredZaloTags.length > 0" class="zalo-native-groups">
+              <div
+                v-for="group in filteredZaloTagGroups"
+                :key="`zalo-main-group-${group.accountId || 'legacy'}`"
+                class="zalo-native-group"
+              >
+                <div v-if="showZaloTagAccountGroups" class="zalo-native-account">{{ group.accountName }}</div>
+                <div class="tag-pill-row scroll">
+                  <button
+                    v-for="tag in group.tags"
+                    :key="`zalo-main-${tag.id}`"
+                    type="button"
+                    class="tag-pill zalo"
+                    :class="{ selected: filters.state.tagsZalo.includes(tag.value) }"
+                    :title="tag.accountName ? `${tag.name} · ${tag.accountName}` : tag.name"
+                    @click="toggleZaloTag(tag.value)"
+                  >
+                    <span class="zalo-dot" :style="{ background: tag.color || '#0068ff' }"></span>
+                    <span v-if="tag.emoji">{{ tag.emoji }}</span>
+                    {{ tag.name }}
+                    <span v-if="tag.assignedCount !== undefined" class="tag-count">{{ tag.assignedCount }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div v-if="tagSearch && filteredCrmTags.length === 0 && filteredZaloTags.length === 0" class="tag-empty">
@@ -709,7 +779,7 @@
           </div>
           <div class="footer-chips">
             <button
-              v-for="chip in filters.activeFilterChips.value"
+              v-for="chip in displayActiveFilterChips"
               :key="chip.key"
               type="button"
               class="f-chip"
@@ -732,6 +802,7 @@ import PrivacyLockBadge from '@/components/privacy/PrivacyLockBadge.vue';
 import PrivacyUnlockDialog from '@/components/privacy/PrivacyUnlockDialog.vue';
 import { usePrivacyStore } from '@/stores/privacy';
 import { useAuthStore } from '@/stores/auth';
+import { api } from '@/api/index';
 
 const props = defineProps<{
   filters: any; // useInboxFilters() return
@@ -745,7 +816,7 @@ const props = defineProps<{
   currentAccount?: { id: string; displayName: string | null; avatarUrl?: string | null; status: string } | null;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   'manage-folders': [];
   'clear-account-filter': [];
   'change': [];
@@ -955,25 +1026,139 @@ const folderPickerTitle = computed(() => {
 // ─── Tag def fetch + split ───────────────────────────────
 const { tagDefs, loadTagDefs } = useCrmTagDefs();
 
+interface ZaloNativeLabelOption {
+  accountId: string;
+  accountName: string;
+  labelId: number;
+  name: string;
+  color?: string | null;
+  emoji?: string | null;
+  assignedCount?: number;
+}
+
+interface ZaloFilterTag {
+  id: string;
+  value: string;
+  accountId: string | null;
+  accountName: string;
+  labelId: number | null;
+  name: string;
+  color?: string | null;
+  emoji?: string | null;
+  assignedCount?: number;
+  order: number;
+  legacy?: boolean;
+}
+
 const crmTagsList = computed<CrmTagDef[]>(() =>
   tagDefs.value.filter((t) => t.managedBy !== 'zalo_sync')
 );
-const zaloTagsList = computed<CrmTagDef[]>(() =>
-  tagDefs.value.filter((t) => t.managedBy === 'zalo_sync')
+
+const nativeZaloLabels = ref<ZaloNativeLabelOption[]>([]);
+const nativeZaloLabelsLoaded = ref(false);
+const syncingNativeLabels = ref(false);
+
+function selectedLabelAccountIds(): string[] {
+  if (props.currentAccountId) return [props.currentAccountId];
+  if (selectedFolder.value?.members?.length) {
+    return selectedFolder.value.members.map((member) => member.id);
+  }
+  return [];
+}
+
+const syncableAccountIds = computed(() => {
+  const selectedIds = selectedLabelAccountIds();
+  if (selectedIds.length > 0) return selectedIds;
+  return Array.from(new Set(nativeZaloLabels.value.map((label) => label.accountId).filter(Boolean)));
+});
+
+const syncNativeLabelTitle = computed(() => {
+  const count = syncableAccountIds.value.length;
+  if (count === 0) return 'Chưa có nick Zalo cụ thể để đồng bộ nhanh';
+  return `Đồng bộ tag Zalo native cho ${count} nick trong phạm vi hiện tại`;
+});
+
+async function loadNativeZaloLabels() {
+  try {
+    const accountIds = selectedLabelAccountIds();
+    const params = accountIds.length > 0 ? { accountIds: accountIds.join(',') } : {};
+    const { data } = await api.get('/chat/zalo-native-labels', { params });
+    nativeZaloLabels.value = Array.isArray(data?.labels) ? data.labels : [];
+    nativeZaloLabelsLoaded.value = true;
+  } catch {
+    nativeZaloLabels.value = [];
+    nativeZaloLabelsLoaded.value = false;
+  }
+}
+
+async function syncNativeZaloLabels() {
+  const accountIds = syncableAccountIds.value;
+  if (syncingNativeLabels.value || accountIds.length === 0) return;
+  syncingNativeLabels.value = true;
+  try {
+    await Promise.all(
+      accountIds.map((accountId) =>
+        api.post(`/zalo-accounts/${accountId}/labels/sync`).catch(() => null),
+      ),
+    );
+    await Promise.all([loadNativeZaloLabels(), loadTagDefs()]);
+    emit('change');
+  } finally {
+    syncingNativeLabels.value = false;
+  }
+}
+
+const legacyZaloTagsList = computed<ZaloFilterTag[]>(() =>
+  tagDefs.value
+    .filter((t) => t.managedBy === 'zalo_sync')
+    .map((tag) => ({
+      id: `legacy-${tag.id}`,
+      value: cleanTagName(tag.name),
+      accountId: null,
+      accountName: 'Zalo native',
+      labelId: null,
+      name: cleanTagName(tag.name),
+      color: null,
+      emoji: tag.emoji,
+      assignedCount: undefined,
+      order: tag.order,
+      legacy: true,
+    }))
+);
+
+const nativeZaloTagsList = computed<ZaloFilterTag[]>(() =>
+  nativeZaloLabels.value.map((label, index) => ({
+    id: `${label.accountId}:${label.labelId}`,
+    value: `${label.accountId}:${label.labelId}`,
+    accountId: label.accountId,
+    accountName: label.accountName,
+    labelId: label.labelId,
+    name: label.name,
+    color: label.color,
+    emoji: label.emoji,
+    assignedCount: label.assignedCount,
+    order: index,
+  }))
+);
+
+const zaloTagsList = computed<ZaloFilterTag[]>(() =>
+  nativeZaloLabelsLoaded.value && nativeZaloTagsList.value.length > 0
+    ? nativeZaloTagsList.value
+    : legacyZaloTagsList.value
 );
 const totalTagDefsCount = computed(() => crmTagsList.value.length + zaloTagsList.value.length);
 
 // Strip "🔵 " prefix from Zalo tag display (DB legacy data)
-function displayTagName(name: string): string {
-  return cleanTagName(name);
-}
-
 // ─── Tag search + selected-first ordering ────────────────
 const tagSearch = ref('');
 
 function rankTag(tag: CrmTagDef, selectedSet: Set<string>): number {
   const isSelected = selectedSet.has(tag.name) || selectedSet.has(cleanTagName(tag.name));
   return isSelected ? 0 : 1;
+}
+
+function rankZaloTag(tag: ZaloFilterTag, selectedSet: Set<string>): number {
+  return selectedSet.has(tag.value) ? 0 : 1;
 }
 
 const filteredCrmTags = computed<CrmTagDef[]>(() => {
@@ -990,19 +1175,85 @@ const filteredCrmTags = computed<CrmTagDef[]>(() => {
   });
 });
 
-const filteredZaloTags = computed<CrmTagDef[]>(() => {
+const filteredZaloTags = computed<ZaloFilterTag[]>(() => {
   const q = tagSearch.value.trim().toLowerCase();
   const selected = new Set(props.filters.state.tagsZalo as string[]);
   const list = q
-    ? zaloTagsList.value.filter((t) => cleanTagName(t.name).toLowerCase().includes(q))
+    ? zaloTagsList.value.filter((t) => `${t.name} ${t.accountName}`.toLowerCase().includes(q))
     : zaloTagsList.value;
   return [...list].sort((a, b) => {
-    const ra = rankTag(a, selected);
-    const rb = rankTag(b, selected);
+    const ra = rankZaloTag(a, selected);
+    const rb = rankZaloTag(b, selected);
     if (ra !== rb) return ra - rb;
+    const accountCompare = a.accountName.localeCompare(b.accountName);
+    if (accountCompare !== 0) return accountCompare;
     return a.order - b.order;
   });
 });
+
+const filteredZaloTagGroups = computed(() => {
+  const groups = new Map<string, { accountId: string | null; accountName: string; tags: ZaloFilterTag[] }>();
+  for (const tag of filteredZaloTags.value) {
+    const key = tag.accountId || 'legacy';
+    const existing = groups.get(key);
+    if (existing) {
+      existing.tags.push(tag);
+    } else {
+      groups.set(key, {
+        accountId: tag.accountId,
+        accountName: tag.accountName,
+        tags: [tag],
+      });
+    }
+  }
+  return [...groups.values()];
+});
+
+const showZaloTagAccountGroups = computed(() => !props.currentAccountId && filteredZaloTagGroups.value.length > 1);
+
+function isNativeZaloLabelToken(value: string): boolean {
+  return /^[^:\s]+:\d+$/.test(value);
+}
+
+const nativeZaloSelectedCount = computed(() =>
+  (props.filters.state.tagsZalo as string[]).filter(isNativeZaloLabelToken).length,
+);
+
+function setZaloLabelMode(mode: 'or' | 'and') {
+  props.filters.state.zaloLabelMode = mode;
+  props.filters.activePresetId.value = null;
+  emit('change');
+}
+
+const zaloTagLabelByValue = computed(() => {
+  const map = new Map<string, string>();
+  for (const tag of zaloTagsList.value) {
+    const suffix = tag.accountName && tag.accountName !== 'Zalo native' ? ` · ${tag.accountName}` : '';
+    map.set(tag.value, `🔵 ${tag.name}${suffix}`);
+  }
+  return map;
+});
+
+const displayActiveFilterChips = computed(() =>
+  props.filters.activeFilterChips.value.map((chip: { key: string; label: string; remove: () => void }) => {
+    if (!chip.key.startsWith('zalo:')) return chip;
+    const value = chip.key.slice('zalo:'.length);
+    const label = zaloTagLabelByValue.value.get(value);
+    return label ? { ...chip, label } : chip;
+  }),
+);
+
+watch(
+  () => [
+    props.currentAccountId || '',
+    selectedFolder.value?.id || '',
+    selectedFolder.value?.members.map((member) => member.id).join(',') || '',
+  ],
+  () => {
+    void loadNativeZaloLabels();
+  },
+  { immediate: true },
+);
 
 // ─── Constants ───────────────────────────────────────────
 const AUTO_TAGS: Array<{ key: AutoTagKey; icon: string; label: string }> = [
@@ -1147,6 +1398,9 @@ function toggleZaloTag(name: string) {
   const arr = props.filters.state.tagsZalo as string[];
   const idx = arr.indexOf(name);
   if (idx >= 0) arr.splice(idx, 1); else arr.push(name);
+  if ((props.filters.state.tagsZalo as string[]).filter(isNativeZaloLabelToken).length < 2) {
+    props.filters.state.zaloLabelMode = 'or';
+  }
   props.filters.activePresetId.value = null;
 }
 function toggleAutoTag(key: AutoTagKey) {
@@ -1449,6 +1703,62 @@ onMounted(async () => {
   margin: 8px 0 5px;
 }
 .po-sub-label:first-child { margin-top: 0; }
+.row-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sync-label-btn {
+  border: 1px solid #D7DDEA;
+  background: #FFFFFF;
+  color: #2563EB;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  cursor: pointer;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.sync-label-btn:hover:not(:disabled) {
+  background: #EEF4FF;
+  border-color: #93B4FF;
+}
+.sync-label-btn:disabled {
+  cursor: not-allowed;
+  color: #A5AEC0;
+  background: #F4F6FA;
+}
+.zalo-label-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  margin: 6px 0 8px;
+  border: 1px solid #DDE5F3;
+  border-radius: 8px;
+  background: #F3F6FB;
+}
+.zalo-label-mode button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #52627A;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.zalo-label-mode button.active {
+  background: #FFFFFF;
+  color: #0057D9;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
 .po-preset-row {
   display: flex;
   align-items: center;
@@ -1827,6 +2137,24 @@ onMounted(async () => {
 }
 .tag-pill-row.scroll::-webkit-scrollbar { width: 4px; }
 .tag-pill-row.scroll::-webkit-scrollbar-thumb { background: #D4D6DB; border-radius: 2px; }
+.zalo-native-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.zalo-native-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.zalo-native-account {
+  padding: 2px 2px 0;
+  color: #6B7280;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .tag-pill {
   display: inline-flex;
   align-items: center;
@@ -2116,4 +2444,21 @@ onMounted(async () => {
   border-radius: 4px;
 }
 .clear-all:hover { background: #5E6AD2; color: white; }
+.tag-pill .tag-count {
+  display: inline-flex;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #EEF2FF;
+  color: #4F46E5;
+  font-size: 10px;
+  font-weight: 700;
+}
+.tag-pill.selected .tag-count {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
 </style>

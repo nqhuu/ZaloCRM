@@ -13,6 +13,7 @@
       :current-account="currentAccount"
       @manage-folders="showFolderManagePopup = true"
       @clear-account-filter="onFilterAccount(null)"
+      @change="onSidebarFilterChanged"
     />
 
     <!-- COL 2: conversation list — FilterBar render INSIDE via named slot
@@ -92,6 +93,7 @@
       v-if="showContactPanel && selectedConv?.contact"
       :contact-id="selectedConv.contact.id"
       :contact="selectedConv.contact"
+      :conversation="selectedConv"
       :friendship="selectedConv.friendship ?? null"
       :active-zalo-account-id="selectedConv.zaloAccount?.id ?? null"
       :friend-id="selectedConv.friendship?.id ?? null"
@@ -338,6 +340,10 @@ function onFolderViewApplied(payload: { folderId: string | null; accountId: stri
 function onFiltersUpdate(params: Record<string, string>) {
   extraFilters.value = { ...extraFilters.value, ...params };
   fetchConversations();
+}
+function onSidebarFilterChanged() {
+  extraFilters.value = inboxFilters.buildQueryParams();
+  fetchConversations({ bypassCache: true });
 }
 function onConversationMoved(_id: string, _tab: string) {
   // bypassCache: conv vừa move qua tab khác → cache cũ sẽ flicker conv tại tab cũ

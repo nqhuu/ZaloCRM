@@ -21,8 +21,6 @@ Thiết kế phải đáp ứng:
 - Tương thích với dữ liệu hồ sơ đang dùng trạng thái `pending`.
 - Trạng thái do Admin bổ sung vẫn phải được gắn với một nhóm hành vi hệ thống để các chức năng đồng bộ, báo cáo và phân quyền hoạt động đúng.
 
-Quy tắc phòng ban, người phụ trách tài khoản Zalo và người xử lý mặc định của hồ sơ được mô tả tại `05-zalo-account-department-and-assignee-rules.md`.
-
 ---
 
 ## 2. Thuật ngữ
@@ -88,7 +86,7 @@ Quy tắc:
 - Desktop: mở khi rê chuột hoặc focus bằng bàn phím.
 - Mobile/tablet: mở khi chạm vào icon.
 - Hiển thị tối đa 5 hồ sơ trong popover.
-- Nếu còn dữ liệu: hiển thị `Xem thêm N hồ sơ`.
+- Nếu còn dữ liệu: hiển thị `Xem thêm hồ sơ`.
 - Mỗi dòng gồm tên hồ sơ và nhãn trạng thái.
 - Có thể bổ sung phòng ban/người phụ trách bằng chữ nhỏ khi cần phân biệt hai hồ sơ trùng tên.
 - Click vào tên hồ sơ mở popup chi tiết hồ sơ hiện có.

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div
     class="message-thread"
     :class="{ 'drag-over': isDraggingFiles }"
@@ -260,7 +260,16 @@
 
           <!-- Album — Phase A UI fix (2026-05-21): thêm Avatar top-left khớp với
                message-bubble để align lề trái nhất quán. Sender name vào TRONG bubble. -->
-          <div v-else-if="item.kind === 'album'" class="msg-album-wrap" :class="item.senderType === 'self' ? 'self' : ''">
+          <div
+            v-else-if="item.kind === 'album'"
+            class="msg-album-wrap"
+            :class="{
+              self: item.senderType === 'self',
+              'msg-archive-selected': isArchiveAlbumFullySelected(item.messages),
+            }"
+            @click="onAlbumClick($event, item.messages)"
+            @contextmenu.prevent="onAlbumContextMenu($event, item)"
+          >
             <Avatar
               v-if="item.senderType !== 'self'"
               :src="resolveSenderAvatar(item.messages[0])"
@@ -281,7 +290,7 @@
                     :src="getImageUrl(m)!"
                     alt="Hình ảnh"
                     class="album-tile"
-                    @click="openImageLightbox(getImageUrl(m)!, item.messages.map(x => getImageUrl(x)!).filter(Boolean))"
+                    @click="onAlbumImageClick($event, m, item.messages)"
                   />
                 </div>
                 <div v-if="item.totalExpected && item.totalExpected > item.messages.length" class="album-progress">
@@ -568,11 +577,16 @@
           <template v-else>
             <v-text-field :model-value="archiveDefaultTitle" label="Tên hồ sơ mặc định" readonly />
             <v-text-field
-              v-model="archiveForm.titleSuffix"
+              v-model="archiveForm.title"
               label="Nội dung bổ sung cho tên hồ sơ"
               placeholder="Ví dụ: Đơn máy lọc nước"
               hint="Để trống sẽ dùng tên khách hàng hoặc nhóm chat"
               persistent-hint
+            />
+            <v-text-field
+              v-model="archiveForm.orderCode"
+              label="Mã đơn hàng"
+              placeholder="Mã từ hệ thống khác"
             />
             <v-select
               v-model="archiveForm.recordType"
@@ -581,6 +595,19 @@
               item-value="value"
               label="Loại hồ sơ"
             />
+            <v-select
+              v-model="archiveForm.priority"
+              :items="archivePriorityOptions"
+              item-title="label"
+              item-value="value"
+              label="Mức độ ưu tiên"
+            />
+            <div class="archive-confirmation-setup">
+              <div>
+                <span>Cần xác nhận theo user/nhóm</span>
+                <strong>{{ archiveConfirmationLabel(archiveSaveContext.conversationConfirmationDefault) }}</strong>
+              </div>
+            </div>
             <v-select
               v-model="archiveForm.departmentId"
               :items="archiveSaveContext.departments"
@@ -596,6 +623,12 @@
               item-value="id"
               label="Người phụ trách"
               :readonly="!archiveSaveContext.canAssignOthers"
+            />
+            <v-textarea
+              v-model="archiveForm.extraNote"
+              label="Ghi chú khác"
+              rows="2"
+              auto-grow
             />
           </template>
 
@@ -927,6 +960,7 @@ function onMessageCallback(_msg: Message) {
 const showContextMenu = ref(false);
 const contextMsg = ref<Message | null>(null);
 const contextPos = ref({ x: 0, y: 0 });
+const contextArchiveMessageIds = ref<string[]>([]);
 const showForwardDialog = ref(false);
 const showLinkParentDialog = ref(false);
 const selectedArchiveMessageIds = ref<Set<string>>(new Set());
@@ -959,6 +993,8 @@ const archiveSaveContext = ref<{
   defaultRecordType: string;
   currentDepartment: { id: string; name: string } | null;
   currentUser: { id: string; fullName: string } | null;
+  conversationConfirmationDefault: boolean | null;
+  conversationConfirmationUpdatedAt?: string | null;
   canAssignOthers: boolean;
   departments: Array<{ id: string; name: string }>;
   users: Array<{ id: string; fullName: string; departmentId: string | null }>;
@@ -966,6 +1002,8 @@ const archiveSaveContext = ref<{
   defaultRecordType: 'order',
   currentDepartment: null,
   currentUser: null,
+  conversationConfirmationDefault: null,
+  conversationConfirmationUpdatedAt: null,
   canAssignOthers: false,
   departments: [],
   users: [],
@@ -973,7 +1011,10 @@ const archiveSaveContext = ref<{
 const archiveForm = ref({
   mode: 'create' as 'create' | 'append',
   storyId: '',
-  titleSuffix: '',
+  title: '',
+  orderCode: '',
+  priority: 'normal',
+  extraNote: '',
   recordType: 'order',
   departmentId: '',
   assignedUserId: '',
@@ -984,7 +1025,20 @@ const archiveRecordTypes = [
   { label: 'Chăm sóc khách hàng', value: 'customer_care' },
   { label: 'Khác', value: 'other' },
 ];
+const defaultArchivePriorityOptions = [
+  { label: 'Thấp', value: 'low' },
+  { label: 'Bình thường', value: 'normal' },
+  { label: 'Ưu tiên', value: 'high' },
+  { label: 'Gấp', value: 'urgent' },
+];
+const archivePriorityOptions = ref([...defaultArchivePriorityOptions]);
 const archiveDefaultTitle = computed(() => headerName.value || 'Hồ sơ mới');
+function archiveConfirmationLabel(value?: boolean | null) {
+  if (value === true) return 'Có';
+  if (value === false) return 'Không';
+  return 'Chưa cài đặt';
+}
+
 function canAppendToArchiveStory(story: (typeof archiveStories.value)[number]) {
   return story.statusDefinition
     ? story.statusDefinition.allowMessageAppend
@@ -2049,12 +2103,23 @@ function albumGridClass(count: number): string {
 // ── Context menu / actions ──────────────────────────────────────────────────
 function onContextMenu(event: MouseEvent, msg: Message) {
   contextMsg.value = msg;
+  contextArchiveMessageIds.value = [msg.id];
+  contextPos.value = { x: event.clientX, y: event.clientY };
+  showContextMenu.value = true;
+}
+function onAlbumContextMenu(event: MouseEvent, album: Extract<DisplayItem, { kind: 'album' }>) {
+  const messageIds = album.messages.map((msg) => msg.id);
+  contextMsg.value = album.messages[0] || null;
+  contextArchiveMessageIds.value = messageIds;
   contextPos.value = { x: event.clientX, y: event.clientY };
   showContextMenu.value = true;
 }
 function startArchiveSelection() {
-  if (!contextMsg.value) return;
-  selectedArchiveMessageIds.value = new Set([contextMsg.value.id]);
+  const ids = contextArchiveMessageIds.value.length
+    ? contextArchiveMessageIds.value
+    : (contextMsg.value ? [contextMsg.value.id] : []);
+  if (!ids.length) return;
+  selectedArchiveMessageIds.value = new Set(ids);
 }
 function toggleArchiveMessage(msg: Message) {
   const next = new Set(selectedArchiveMessageIds.value);
@@ -2062,9 +2127,39 @@ function toggleArchiveMessage(msg: Message) {
   else next.add(msg.id);
   selectedArchiveMessageIds.value = next;
 }
+function isArchiveAlbumFullySelected(messages: Message[]) {
+  return messages.length > 0 && messages.every((msg) => selectedArchiveMessageIds.value.has(msg.id));
+}
+function toggleArchiveAlbum(messages: Message[]) {
+  if (!messages.length) return;
+  const next = new Set(selectedArchiveMessageIds.value);
+  const allSelected = messages.every((msg) => next.has(msg.id));
+  for (const msg of messages) {
+    if (allSelected) next.delete(msg.id);
+    else next.add(msg.id);
+  }
+  selectedArchiveMessageIds.value = next;
+}
+function onAlbumImageClick(event: MouseEvent, message: Message, albumMessages: Message[]) {
+  if (archiveSelectionMode.value) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleArchiveAlbum(albumMessages);
+    return;
+  }
+  const imageUrl = getImageUrl(message);
+  if (!imageUrl) return;
+  openImageLightbox(imageUrl, albumMessages.map((msg) => getImageUrl(msg)).filter(Boolean) as string[]);
+}
 function cancelArchiveSelection() {
   selectedArchiveMessageIds.value = new Set();
   archiveConflictMessageIds.value = new Set();
+}
+function onAlbumClick(event: MouseEvent, messages: Message[]) {
+  if (!archiveSelectionMode.value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  toggleArchiveAlbum(messages);
 }
 function onMessageBubbleClick(event: MouseEvent, msg: Message) {
   if (archiveSelectionMode.value) {
@@ -2085,6 +2180,7 @@ async function openArchiveSaveDialog() {
     const [contextResponse, storiesResponse] = await Promise.all([
       api.get('/archive/save-context', { params: { conversationId: props.conversation.id } }),
       api.get(`/archive/conversations/${props.conversation.id}/stories`),
+      loadArchivePriorityOptions(),
     ]);
     archiveSaveContext.value = contextResponse.data;
     archiveStories.value = storiesResponse.data.stories || [];
@@ -2092,7 +2188,10 @@ async function openArchiveSaveDialog() {
     archiveForm.value = {
       mode: pendingStory ? 'append' : 'create',
       storyId: pendingStory?.id || '',
-      titleSuffix: '',
+      title: '',
+      orderCode: '',
+      priority: 'normal',
+      extraNote: '',
       recordType: contextResponse.data.defaultRecordType || 'order',
       departmentId: contextResponse.data.defaultDepartment?.id
         || contextResponse.data.currentDepartment?.id
@@ -2106,6 +2205,21 @@ async function openArchiveSaveDialog() {
     toast.error(error?.response?.data?.error || 'Không thể tải thông tin lưu hồ sơ');
   } finally {
     archiveDialogLoading.value = false;
+  }
+}
+
+async function loadArchivePriorityOptions() {
+  try {
+    const { data } = await api.get('/archive/priority-options');
+    const options = Array.isArray(data.options)
+      ? data.options
+        .filter((item: any) => item?.isActive !== false && item?.key && item?.label)
+        .sort((left: any, right: any) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0))
+        .map((item: any) => ({ label: String(item.label), value: String(item.key) }))
+      : [];
+    archivePriorityOptions.value = options.length ? options : [...defaultArchivePriorityOptions];
+  } catch {
+    archivePriorityOptions.value = [...defaultArchivePriorityOptions];
   }
 }
 
@@ -2146,13 +2260,16 @@ async function persistArchiveSelection(allowCrossStoryDuplicates: boolean) {
     const response = archiveForm.value.mode === 'append'
       ? await api.post(`/archive/stories/${archiveForm.value.storyId}/messages`, payload)
       : await api.post('/archive/stories', {
-          ...payload,
-          conversationId: props.conversation.id,
-          titleSuffix: archiveForm.value.titleSuffix,
-          recordType: archiveForm.value.recordType,
-          departmentId: archiveForm.value.departmentId || null,
-          assignedUserId: archiveForm.value.assignedUserId || null,
-        });
+        ...payload,
+        conversationId: props.conversation.id,
+        title: archiveForm.value.title,
+        orderCode: archiveForm.value.orderCode,
+        priority: archiveForm.value.priority,
+        extraNote: archiveForm.value.extraNote,
+        recordType: archiveForm.value.recordType,
+        departmentId: archiveForm.value.departmentId || null,
+        assignedUserId: archiveForm.value.assignedUserId || null,
+      });
     const data = response.data;
     toast.success(data.message || `Đã lưu ${selectedArchiveMessageIds.value.size} tin nhắn`);
     if (data.story?.backupStatus === 'failed') {
@@ -2585,6 +2702,42 @@ watch(() => props.editingMessage?.id, async (id) => {
 .archive-conflict-list span {
   color: #9a3412;
   font-size: 12px;
+}
+
+.archive-confirmation-setup {
+  display: flex;
+  min-height: 48px;
+  padding: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.archive-confirmation-setup > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.archive-confirmation-setup span {
+  color: #64748b;
+  font-size: 11px;
+}
+.archive-confirmation-setup strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.archive-choice-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.archive-choice-toggle :deep(.v-btn) {
+  flex: 1 1 110px;
 }
 
 .archive-selection-bar {
@@ -3085,6 +3238,11 @@ watch(() => props.editingMessage?.id, async (id) => {
 .msg-album-wrap.self { flex-direction: row-reverse; }
 .msg-album-wrap .msg-avatar { flex-shrink: 0; }
 .msg-album-body { max-width: 60%; }
+.msg-album-wrap.msg-archive-selected .bubble.album {
+  outline: 2px solid rgba(37, 99, 235, 0.65);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
 .bubble.album {
   background: var(--smax-bg);
   border-radius: 13px;
@@ -3402,3 +3560,4 @@ watch(() => props.editingMessage?.id, async (id) => {
 .zlbl-manage:hover { background: var(--smax-grey-50); color: var(--smax-primary); }
 .manage-icon { font-size: 14px; }
 </style>
+

@@ -102,7 +102,11 @@ const TABS: Array<{
 
 function setActiveTab(key: TabKey) {
   // Single-active: tab khác sẽ tự deselect.
-  props.filters.state.activeTab = key;
+  if (typeof props.filters?.setActiveTab === 'function') {
+    props.filters.setActiveTab(key);
+  } else {
+    props.filters.state.activeTab = key;
+  }
 }
 
 function toggleSort() {

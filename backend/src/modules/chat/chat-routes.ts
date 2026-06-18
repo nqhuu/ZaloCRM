@@ -199,6 +199,71 @@ function scopedAccountFilter(accessibleIds: string[], requestedIds: string[]) {
 
 // Cooldown cho POST /conversations/:id/touch-profile — tránh spam Zalo SDK.
 // Profile (gender / phone / birthday) hiếm đổi → 5min cooldown đủ.
+function parseNativeZaloLabelTokens(raw: string, accessibleAccountIds: string[]) {
+  const accessible = new Set(accessibleAccountIds);
+  const parsed: Array<{ accountId: string; labelId: number }> = [];
+  for (const token of raw.split(',').map((value) => value.trim()).filter(Boolean)) {
+    const [accountId, labelIdRaw] = token.split(':');
+    const labelId = Number(labelIdRaw);
+    if (!accountId || !Number.isInteger(labelId) || !accessible.has(accountId)) continue;
+    parsed.push({ accountId, labelId });
+  }
+  return parsed;
+}
+
+type NativeZaloLabelView = {
+  id: number;
+  name: string;
+  color: string;
+  emoji: string | null;
+  accountId: string;
+};
+
+function zaloThreadIdCandidates(value: string | null | undefined): string[] {
+  const raw = String(value || '').trim();
+  if (!raw) return [];
+  const candidates = new Set<string>([raw]);
+  if (raw.startsWith('g') && raw.length > 1) {
+    candidates.add(raw.slice(1));
+  } else {
+    candidates.add(`g${raw}`);
+  }
+  return [...candidates];
+}
+
+function normalizeZaloLabelConversationIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set<string>();
+  for (const value of raw) {
+    if (typeof value !== 'string') continue;
+    for (const candidate of zaloThreadIdCandidates(value)) ids.add(candidate);
+  }
+  return [...ids];
+}
+
+function nativeLabelsForThread(
+  labels: Array<{ zaloAccountId: string; zaloLabelId: number; text: string; color: string; emoji: string | null; conversations: unknown }>,
+  accountId: string,
+  threadId: string | null | undefined,
+): NativeZaloLabelView[] {
+  const candidates = new Set(zaloThreadIdCandidates(threadId));
+  if (candidates.size === 0) return [];
+  const result: NativeZaloLabelView[] = [];
+  for (const label of labels) {
+    if (label.zaloAccountId !== accountId) continue;
+    const convIds = normalizeZaloLabelConversationIds(label.conversations);
+    if (!convIds.some((id) => candidates.has(id))) continue;
+    result.push({
+      id: label.zaloLabelId,
+      name: label.text,
+      color: label.color,
+      emoji: label.emoji,
+      accountId: label.zaloAccountId,
+    });
+  }
+  return result;
+}
+
 const profileTouchCooldown = new Map<string, number>();
 const PROFILE_TOUCH_COOLDOWN_MS = 5 * 60_000;
 
@@ -226,6 +291,100 @@ export async function chatRoutes(app: FastifyInstance) {
   });
 
   // ── List conversations (paginated, filterable) ──────────────────────────
+  app.get('/api/v1/chat/zalo-native-labels', async (request: FastifyRequest) => {
+    const user = request.user!;
+    const { accountIds = '' } = request.query as QueryParams;
+    const scope = await getZaloScope(user.id, user.orgId, user.role);
+    const requestedIds = accountIds.split(',').map((id) => id.trim()).filter(Boolean);
+    const allowedIds = requestedIds.length
+      ? requestedIds.filter((id) => scope.accessibleIds.includes(id))
+      : scope.accessibleIds;
+
+    if (allowedIds.length === 0) return { labels: [] };
+
+    const labels = await prisma.zaloLabel.findMany({
+      where: {
+        orgId: user.orgId,
+        zaloAccountId: { in: allowedIds },
+      },
+      include: {
+        zaloAccount: {
+          select: {
+            id: true,
+            displayName: true,
+            phone: true,
+          },
+        },
+      },
+      orderBy: [
+        { zaloAccountId: 'asc' },
+        { offset: 'asc' },
+        { text: 'asc' },
+      ],
+    });
+
+    return {
+      labels: labels.map((label) => ({
+        accountId: label.zaloAccountId,
+        accountName: label.zaloAccount.displayName || label.zaloAccount.phone || 'Nick Zalo',
+        labelId: label.zaloLabelId,
+        name: label.text,
+        color: label.color,
+        emoji: label.emoji,
+        assignedCount: Array.isArray(label.conversations) ? label.conversations.length : 0,
+      })),
+    };
+  });
+
+  app.get('/api/v1/chat/zalo-native-label-stats', async (request: FastifyRequest) => {
+    const user = request.user!;
+    const { accountIds = '' } = request.query as QueryParams;
+    const scope = await getZaloScope(user.id, user.orgId, user.role);
+    const requestedIds = accountIds.split(',').map((id) => id.trim()).filter(Boolean);
+    const allowedIds = requestedIds.length
+      ? requestedIds.filter((id) => scope.accessibleIds.includes(id))
+      : scope.accessibleIds;
+
+    if (allowedIds.length === 0) return { labels: [] };
+
+    const labels = await prisma.zaloLabel.findMany({
+      where: {
+        orgId: user.orgId,
+        zaloAccountId: { in: allowedIds },
+      },
+      include: {
+        zaloAccount: {
+          select: {
+            id: true,
+            displayName: true,
+            phone: true,
+          },
+        },
+      },
+      orderBy: [
+        { zaloAccountId: 'asc' },
+        { offset: 'asc' },
+        { text: 'asc' },
+      ],
+    });
+
+    return {
+      labels: labels.map((label) => {
+        const conversationIds = normalizeZaloLabelConversationIds(label.conversations);
+        return {
+          accountId: label.zaloAccountId,
+          accountName: label.zaloAccount.displayName || label.zaloAccount.phone || 'Nick Zalo',
+          labelId: label.zaloLabelId,
+          name: label.text,
+          color: label.color,
+          emoji: label.emoji,
+          assignedCount: conversationIds.length,
+          syncedAt: label.syncedAt,
+        };
+      }),
+    };
+  });
+
   app.get('/api/v1/conversations', async (request: FastifyRequest, reply: FastifyReply) => {
     const user = request.user!;
     const {
@@ -259,6 +418,8 @@ export async function chatRoutes(app: FastifyInstance) {
       stuck = '',               // 'true' → friends.some.stuckSince != null
       ready = '',               // 'true' → score >= 80
       zaloLabels = '',          // CSV: filter by Zalo Real labels
+      zaloLabelIds = '',        // CSV: <zaloAccountId>:<zaloLabelId> native labels
+      zaloLabelMode = 'or',
       engagementPattern = '',   // Phase 8 — CSV: hot,champion,stable,cooling,cold
     } = request.query as QueryParams;
 
@@ -364,6 +525,77 @@ export async function chatRoutes(app: FastifyInstance) {
       if (patterns.length === 1) contactWhere.engagementPattern = patterns[0];
       else if (patterns.length > 1) contactWhere.engagementPattern = { in: patterns };
     }
+    if (zaloLabelIds) {
+      const requestedLabels = parseNativeZaloLabelTokens(zaloLabelIds, scope.accessibleIds);
+      if (requestedLabels.length > 0) {
+        const labelRows = await prisma.zaloLabel.findMany({
+          where: {
+            orgId: user.orgId,
+            OR: requestedLabels.map((label) => ({
+              zaloAccountId: label.accountId,
+              zaloLabelId: label.labelId,
+            })),
+          },
+          select: {
+            zaloAccountId: true,
+            zaloLabelId: true,
+            conversations: true,
+          },
+        });
+
+        const buildLabelConditions = (label: typeof labelRows[number]): Array<Record<string, unknown>> => {
+          const conditions: Array<Record<string, unknown>> = [{
+            zaloAccountId: label.zaloAccountId,
+            contact: {
+              friends: {
+                some: {
+                  zaloAccountId: label.zaloAccountId,
+                  zaloLabels: { path: ['$[*].id'], array_contains: [label.zaloLabelId] },
+                },
+              },
+            },
+          }];
+
+          const conversationIds = normalizeZaloLabelConversationIds(label.conversations);
+          if (conversationIds.length > 0) {
+            conditions.push({
+              zaloAccountId: label.zaloAccountId,
+              externalThreadId: { in: conversationIds },
+            });
+          }
+          return conditions;
+        };
+
+        const labelMode = String(zaloLabelMode).toLowerCase() === 'and' ? 'and' : 'or';
+        const requestedKeys = new Set(requestedLabels.map((label) => `${label.accountId}:${label.labelId}`));
+        const foundKeys = new Set(labelRows.map((label) => `${label.zaloAccountId}:${label.zaloLabelId}`));
+        const allRequestedFound = [...requestedKeys].every((key) => foundKeys.has(key));
+
+        if (labelMode === 'and' && requestedKeys.size > 1) {
+          if (allRequestedFound) {
+            where.AND = [
+              ...(Array.isArray(where.AND) ? where.AND : []),
+              ...labelRows.map((label) => ({ OR: buildLabelConditions(label) })),
+            ];
+          } else {
+            where.id = 'EMPTY_ZALO_LABEL_NO_MATCH';
+          }
+        } else {
+          const labelScopeOr = labelRows.flatMap(buildLabelConditions);
+          if (labelScopeOr.length > 0) {
+            where.AND = [
+              ...(Array.isArray(where.AND) ? where.AND : []),
+              { OR: labelScopeOr },
+            ];
+          } else {
+            where.id = 'EMPTY_ZALO_LABEL_NO_MATCH';
+          }
+        }
+      } else {
+        where.id = 'EMPTY_ZALO_LABEL_NO_MATCH';
+      }
+    }
+
     if (Object.keys(contactWhere).length > 0) where.contact = contactWhere;
 
     // Advanced filters
@@ -524,6 +756,7 @@ export async function chatRoutes(app: FastifyInstance) {
       stuckSince: Date | null;
       statusName: string | null;
       statusColor: string | null;
+      zaloLabels: unknown;
     }>();
     if (userPairs.length) {
       const friends = await prisma.friend.findMany({
@@ -551,6 +784,7 @@ export async function chatRoutes(app: FastifyInstance) {
           leadScore: true,
           autoTags: true,
           stuckSince: true,
+          zaloLabels: true,
           statusId: true,
           statusRef: { select: { name: true, color: true } },
         },
@@ -577,8 +811,24 @@ export async function chatRoutes(app: FastifyInstance) {
         stuckSince: f.stuckSince,
         statusName: f.statusRef?.name ?? null,
         statusColor: f.statusRef?.color ?? null,
+        zaloLabels: f.zaloLabels,
       }]));
     }
+
+    const pageAccountIds = [...new Set(conversations.map((c) => c.zaloAccountId).filter(Boolean))];
+    const nativeLabelRows = pageAccountIds.length
+      ? await prisma.zaloLabel.findMany({
+          where: { orgId: user.orgId, zaloAccountId: { in: pageAccountIds } },
+          select: {
+            zaloAccountId: true,
+            zaloLabelId: true,
+            text: true,
+            color: true,
+            emoji: true,
+            conversations: true,
+          },
+        })
+      : [];
 
     // PRIVACY REDACT 2026-05-22 — apply redactConversationRow + redactMessage
     // cho preview text ở cột 2 khi conv thuộc nick privacy='main' + non-owner.
@@ -590,6 +840,7 @@ export async function chatRoutes(app: FastifyInstance) {
         const base = {
           ...c,
           isPinned: c.pins.length > 0,
+          nativeLabels: nativeLabelsForThread(nativeLabelRows, c.zaloAccountId, c.externalThreadId),
           friendship: c.contactId && c.externalThreadId
             ? friendMap.get(`${c.zaloAccountId}:${c.externalThreadId}`) || null
             : null,
@@ -666,7 +917,24 @@ export async function chatRoutes(app: FastifyInstance) {
       friendship = f;
     }
 
-    return { ...conversation, isPinned: conversation.pins.length > 0, friendship };
+    const nativeLabelRows = await prisma.zaloLabel.findMany({
+      where: { orgId: user.orgId, zaloAccountId: conversation.zaloAccountId },
+      select: {
+        zaloAccountId: true,
+        zaloLabelId: true,
+        text: true,
+        color: true,
+        emoji: true,
+        conversations: true,
+      },
+    });
+
+    return {
+      ...conversation,
+      isPinned: conversation.pins.length > 0,
+      friendship,
+      nativeLabels: nativeLabelsForThread(nativeLabelRows, conversation.zaloAccountId, conversation.externalThreadId),
+    };
   });
 
   // ── POST /conversations/:id/touch-profile — pull profile từ Zalo SDK on conv click.

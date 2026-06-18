@@ -14,6 +14,7 @@ import {
   resolveDefaultArchiveStatus,
 } from './archive-status-service.js';
 import { getEffectivePrimaryAssignee } from '../zalo/zalo-assignment-service.js';
+import { emitNotificationNew } from '../notifications/notification-events.js';
 
 export interface CreateArchiveStoryInput {
   orgId: string;
@@ -22,7 +23,10 @@ export interface CreateArchiveStoryInput {
   conversationId: string;
   messageIds: string[];
   title?: string | null;
-  titleSuffix?: string | null;
+  orderCode?: string | null;
+  priority?: string | null;
+  requiresConfirmation?: boolean | null;
+  extraNote?: string | null;
   recordType?: string | null;
   departmentId?: string | null;
   assignedUserId?: string | null;
@@ -164,10 +168,7 @@ export async function createArchiveStory(input: CreateArchiveStoryInput) {
       })
     : null;
   const conversationName = getConversationName(conversation);
-  const title = composeArchiveTitle(
-    conversationName,
-    input.titleSuffix ?? extractArchiveTitleSuffix(conversationName, input.title),
-  );
+  const title = oneLine(input.title);
   const initialStatus = await resolveDefaultArchiveStatus(input.orgId, assignment.departmentId);
 
   const story = await prisma.$transaction(async (tx) => {
@@ -187,6 +188,12 @@ export async function createArchiveStory(input: CreateArchiveStoryInput) {
         zaloAccountUidSnapshot: conversation.zaloAccount.zaloUid,
         zaloAccountDeletedAt: conversation.zaloAccount.deletedAt,
         title,
+        orderCode: oneLine(input.orderCode) || null,
+        priority: normalizeArchivePriority(input.priority),
+        requiresConfirmation: typeof input.requiresConfirmation === 'boolean'
+          ? input.requiresConfirmation
+          : conversation.requiresConfirmationDefault,
+        extraNote: oneLine(input.extraNote) || null,
         recordType: oneLine(input.recordType) || departmentDefaults?.defaultArchiveRecordType || 'order',
         conversationContent: messages.map(formatArchiveMessage).join('\n'),
         receivedAt: messages[0]?.sentAt || null,
@@ -310,8 +317,11 @@ export async function updateArchiveStoryMetadata(input: {
   userId: string;
   userRole: string;
   storyId: string;
-  title?: string;
-  titleSuffix?: string | null;
+  title?: string | null;
+  orderCode?: string | null;
+  priority?: string | null;
+  requiresConfirmation?: boolean | null;
+  extraNote?: string | null;
   recordType?: string;
   departmentId?: string | null;
   assignedUserId?: string | null;
@@ -321,7 +331,10 @@ export async function updateArchiveStoryMetadata(input: {
     select: {
       id: true,
       title: true,
-      conversationName: true,
+      orderCode: true,
+      priority: true,
+      requiresConfirmation: true,
+      extraNote: true,
       recordType: true,
       departmentId: true,
       assignedUserId: true,
@@ -335,17 +348,16 @@ export async function updateArchiveStoryMetadata(input: {
     requestedDepartmentId: input.departmentId === undefined ? existing.departmentId : input.departmentId,
     requestedAssignedUserId: input.assignedUserId === undefined ? existing.assignedUserId : input.assignedUserId,
   });
-  let title = existing.title;
-  if (input.titleSuffix !== undefined || input.title !== undefined) {
-    const rawSuffix = input.titleSuffix !== undefined
-      ? input.titleSuffix
-      : extractArchiveTitleSuffix(existing.conversationName, input.title || '');
-    title = composeArchiveTitle(existing.conversationName, rawSuffix);
-  }
   return prisma.archiveStory.update({
     where: { id: existing.id },
     data: {
-      title,
+      title: input.title === undefined ? existing.title : oneLine(input.title) || null,
+      orderCode: input.orderCode === undefined ? existing.orderCode : oneLine(input.orderCode) || null,
+      priority: input.priority === undefined ? existing.priority : normalizeArchivePriority(input.priority),
+      requiresConfirmation: input.requiresConfirmation === undefined
+        ? existing.requiresConfirmation
+        : (typeof input.requiresConfirmation === 'boolean' ? input.requiresConfirmation : null),
+      extraNote: input.extraNote === undefined ? existing.extraNote : oneLine(input.extraNote) || null,
       recordType: input.recordType === undefined ? existing.recordType : oneLine(input.recordType) || 'order',
       departmentId: assignment.departmentId,
       assignedUserId: assignment.assignedUserId,
@@ -354,19 +366,9 @@ export async function updateArchiveStoryMetadata(input: {
   });
 }
 
-export function composeArchiveTitle(conversationName: string, titleSuffix?: string | null) {
-  return [oneLine(conversationName), oneLine(titleSuffix)].filter(Boolean).join(' - ');
-}
-
-export function extractArchiveTitleSuffix(conversationName: string, title?: string | null) {
-  const normalizedTitle = oneLine(title);
-  const normalizedName = oneLine(conversationName);
-  if (!normalizedTitle || normalizedTitle === normalizedName) return '';
-
-  const prefix = `${normalizedName} - `;
-  return normalizedTitle.startsWith(prefix)
-    ? normalizedTitle.slice(prefix.length).trim()
-    : normalizedTitle;
+export function normalizeArchivePriority(priority?: string | null) {
+  const normalized = oneLine(priority);
+  return ['low', 'normal', 'high', 'urgent'].includes(normalized) ? normalized : 'normal';
 }
 
 async function snapshotMessages(
@@ -602,12 +604,12 @@ export async function processArchivedMessageRecall(messageIds: string[], io?: Se
     const storyTitle = oneLine(archived.story.title) || oneLine(archived.story.conversationName) || 'Hồ sơ không tên';
     const line = `[${recalledAt.toISOString().replace('T', ' ').slice(0, 19)}] ${sender} đã thu hồi: ${oneLine(snapshot)}${driveLinks.length ? ` | ${driveLinks.join(' | ')}` : ''}`;
 
-    const applied = await prisma.$transaction(async (tx) => {
+    const notificationId = await prisma.$transaction(async (tx) => {
       const updated = await tx.archiveMessage.updateMany({
         where: { id: archived.id, recalledAt: null },
         data: { recalledAt, recalledContent: snapshot },
       });
-      if (updated.count === 0) return false;
+      if (updated.count === 0) return null;
       await tx.archiveRecallEvent.create({
         data: {
           storyId: archived.storyId,
@@ -625,7 +627,7 @@ export async function processArchivedMessageRecall(messageIds: string[], io?: Se
           nextBackupAt: archived.story.destinationId ? new Date() : archived.story.nextBackupAt,
         },
       });
-      await tx.archiveNotification.create({
+      const notification = await tx.archiveNotification.create({
         data: {
           orgId: archived.story.orgId,
           userId: archived.story.assignedUserId,
@@ -638,9 +640,9 @@ export async function processArchivedMessageRecall(messageIds: string[], io?: Se
           dedupeKey: `archive-recall:${archived.id}`,
         },
       });
-      return true;
+      return notification.id;
     });
-    if (!applied) continue;
+    if (!notificationId) continue;
 
     io?.to(`org:${archived.story.orgId}`).emit('archive:message-recalled', {
       storyId: archived.storyId,
@@ -653,6 +655,14 @@ export async function processArchivedMessageRecall(messageIds: string[], io?: Se
       contentType: archived.contentType,
       driveLinks,
       recalledAt: recalledAt.toISOString(),
+    });
+    emitNotificationNew(io, {
+      orgId: archived.story.orgId,
+      userId: archived.story.assignedUserId,
+      source: 'archive',
+      sourceId: archived.storyId,
+      type: 'message_recalled',
+      notificationId,
     });
   }
 }
