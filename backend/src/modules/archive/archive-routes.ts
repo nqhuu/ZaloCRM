@@ -65,6 +65,10 @@ function buildApproxSearch(fields: string[], input?: string): Record<string, unk
   return searchTerms(input).flatMap((term) => fields.map((field) => containsSearch(field, term)));
 }
 
+function oneLineText(input?: string | null): string {
+  return String(input || '').replace(/\s+/g, ' ').trim();
+}
+
 function isAppendBlockedByStatus(story: {
   businessStatus?: string | null;
   statusDefinition?: { allowMessageAppend: boolean } | null;
@@ -412,7 +416,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       if (query.recordType) where.recordType = query.recordType;
       if (query.priority) where.priority = query.priority;
       if (query.requiresConfirmation === 'true') {
-        where.requiresConfirmation = true;
+        where.OR = [...(where.OR || []), { requiresConfirmation: true }, { requiresConfirmation: null }];
       } else if (query.requiresConfirmation === 'false') {
         where.requiresConfirmation = false;
       } else if (query.requiresConfirmation === 'unknown') {
@@ -502,7 +506,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       if (['high', 'urgent'].includes(story.priority)) row.urgentCount += 1;
       if (baseDate && now - baseDate.getTime() > ARCHIVE_WORKLOAD_OVERDUE_MS) row.overdueCount += 1;
       if (isMissingInfoArchiveStory(story)) row.missingInfoCount += 1;
-      if (story.requiresConfirmation === true) row.needsConfirmationCount += 1;
+      if (story.requiresConfirmation !== false) row.needsConfirmationCount += 1;
       if (baseDate && (!row.oldestOpenAt || baseDate < row.oldestOpenAt)) {
         row.oldestOpenAt = baseDate;
       }
@@ -1110,7 +1114,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       where.priority = priorityFilter;
     }
     if (query.requiresConfirmation === 'true') {
-      where.requiresConfirmation = true;
+      where.OR = [...(where.OR || []), { requiresConfirmation: true }, { requiresConfirmation: null }];
     } else if (query.requiresConfirmation === 'false') {
       where.requiresConfirmation = false;
     } else if (query.requiresConfirmation === 'unknown') {
@@ -1449,10 +1453,13 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     const { id } = request.params as { id: string };
     const existing = await prisma.archiveStory.findFirst({
       where: { id, orgId: actor.orgId },
-      select: { createdByUserId: true, assignedUserId: true, departmentId: true },
+      select: { createdByUserId: true, assignedUserId: true, departmentId: true, businessStatus: true },
     });
     if (!existing || !(await canMutateArchiveStory(actor, existing, 'edit'))) {
       return reply.status(404).send({ error: 'Archive story not found' });
+    }
+    if (existing.businessStatus === 'completed') {
+      return reply.status(409).send({ error: 'Hồ sơ đã hoàn thành, không thể cập nhật thông tin' });
     }
     try {
       const {
@@ -1588,6 +1595,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       reasonId?: string | null;
       resultContent?: string | null;
       note?: string | null;
+      orderCode?: string | null;
     };
     if (!body.statusDefinitionId && !body.status) {
       return reply.status(400).send({ error: 'statusDefinitionId is required' });
@@ -1659,6 +1667,12 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (targetStatus.requireResult && !resultContent) {
       return reply.status(400).send({ error: `Trạng thái "${targetStatus.name}" yêu cầu kết quả xử lý` });
     }
+    const nextOrderCode = oneLineText(
+      body.orderCode === undefined ? existing.orderCode : body.orderCode,
+    );
+    if (targetStatus.behaviorGroup === 'completed' && !nextOrderCode) {
+      return reply.status(400).send({ error: 'Trạng thái hoàn thành yêu cầu nhập mã đơn hàng' });
+    }
     const reasonProvided = Object.prototype.hasOwnProperty.call(body, 'reasonId');
     const reasonId = body.reasonId?.trim() || '';
     if (targetStatus.requireReason && sourceStatus.id !== targetStatus.id && !reasonId) {
@@ -1719,6 +1733,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
         data: {
           statusDefinitionId: targetStatus.id,
           businessStatus: legacyBusinessStatus(targetStatus.behaviorGroup),
+          orderCode: body.orderCode === undefined ? existing.orderCode : nextOrderCode,
           resultContent: reopening
             ? null
             : body.resultContent === undefined

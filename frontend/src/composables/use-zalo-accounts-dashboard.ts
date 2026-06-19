@@ -16,6 +16,33 @@ export interface CrewMember {
   user: { id: string; fullName: string | null; email: string };
 }
 
+export interface PrimaryDelegationView {
+  id: string;
+  zaloAccountId: string;
+  departmentId: string;
+  basePrimaryUserId: string;
+  delegateUserId: string;
+  startDate: string;
+  endDate: string;
+  timezone: string;
+  reason: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdAt: string;
+  basePrimaryUser: { id: string; fullName: string | null; email: string };
+  delegateUser: { id: string; fullName: string | null; email: string };
+}
+
+export interface EffectivePrimaryAssignee {
+  source: 'base_primary' | 'delegation';
+  userId: string;
+  fullName: string | null;
+  email: string;
+  basePrimaryUserId: string;
+  basePrimaryUser: { id: string; fullName: string | null; email: string };
+  delegation: PrimaryDelegationView | null;
+}
+
 export interface EnrichedAccount {
   id: string;
   zaloUid: string | null;
@@ -29,6 +56,8 @@ export interface EnrichedAccount {
   createdAt: string;
   owner: { id: string; fullName: string | null; email: string } | null;
   ownerUserId: string | null;
+  effectivePrimary: EffectivePrimaryAssignee | null;
+  activePrimaryDelegation: PrimaryDelegationView | null;
   /** Phase 4 2026-05-22: phòng ban của owner (cho cột Department + filter chip Phòng ban) */
   ownerDepartment: { id: string; name: string; path: string } | null;
   ownerDeptRole: 'leader' | 'deputy' | 'member' | null;

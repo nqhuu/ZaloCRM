@@ -8,9 +8,10 @@
           </th>
           <th>Nick Zalo</th>
           <th>Trạng thái</th>
-          <th>Sale phụ trách (Owner)</th>
+          <th>Sale phụ trách</th>
           <th>Phòng ban</th>
           <th>Đội ngũ chia sẻ</th>
+          <th>Ủy quyền</th>
           <th>Msg today</th>
           <th>Hôm nay <span class="th-hint">📥📤🤖🤝🔍</span></th>
           <th>Hoạt động 7d</th>
@@ -22,7 +23,7 @@
         <template v-for="group in rowGroups" :key="group.key">
           <!-- Group header (chỉ hiện khi groupByDept=true) -->
           <tr v-if="groupByDept && group.label" class="group-row">
-            <td colspan="10">
+            <td colspan="12">
               <div class="group-head">
                 <span class="group-name">{{ group.label }}</span>
                 <span class="group-count">{{ group.accounts.length }} nick</span>
@@ -76,20 +77,21 @@
           <td>
             <!-- Sale phụ trách (chính chủ — ownerUserId). Click → mở reassign drawer nếu canManage. -->
             <div
-              v-if="acct.owner"
+              v-if="responsibleUser(acct)"
               class="owner-cell"
               :class="{ clickable: acct.canReassignOwner }"
-              :title="acct.canReassignOwner ? 'Click để chuyển nhượng owner' : ''"
+              :title="activeDelegation(acct) ? delegationTitle(acct) : (acct.canReassignOwner ? 'Click để chuyển nhượng owner' : '')"
               @click.stop="onOwnerClick(acct)"
             >
-              <span class="avatar-mini owner-avatar" :style="{ background: avatarColor(acct.owner.fullName || acct.owner.email, 0) }">
-                {{ shortName(acct.owner.fullName || acct.owner.email) }}
+              <span class="avatar-mini owner-avatar" :style="{ background: avatarColor(responsibleName(acct), 0) }">
+                {{ shortName(responsibleName(acct)) }}
               </span>
               <div class="owner-info">
-                <div class="owner-name">{{ acct.owner.fullName || acct.owner.email }}</div>
+                <div class="owner-name">{{ responsibleName(acct) }}</div>
                 <div class="owner-tag">
-                  <span class="badge-owner">Chính chủ</span>
-                  <span v-if="acct.isOwnedByMe" class="badge-self">Bạn</span>
+                  <span class="badge-owner">Phụ trách chính</span>
+                  <span v-if="activeDelegation(acct)" class="badge-owner delegated">Đang ủy quyền</span>
+                  <span v-if="acct.isOwnedByMe && responsibleUser(acct)?.id === acct.ownerUserId" class="badge-self">Bạn</span>
                   <!-- Phase Privacy v2 2026-05-23 — badge nick này là internal contact của ai -->
                   <span
                     v-if="acct.isInternalContactFor"
@@ -102,7 +104,7 @@
               </div>
               <svg v-if="acct.canReassignOwner" class="owner-edit-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </div>
-            <span v-else class="muted-italic">Chưa có owner</span>
+            <span v-else class="muted-italic">Chưa có phụ trách</span>
           </td>
           <td>
             <!-- Phòng ban của owner — Phase 4 2026-05-22 -->
@@ -127,6 +129,13 @@
                 <span class="perm-dot" :class="`perm-${c.permission}`" :title="permLabel(c.permission)"></span>
               </span>
               <span v-if="crewWithoutOwner(acct).length > 3" class="more">+{{ crewWithoutOwner(acct).length - 3 }}</span>
+            </div>
+            <span v-else class="muted-italic">—</span>
+          </td>
+          <td>
+            <div v-if="activeDelegation(acct)" class="delegation-cell">
+              <div class="delegation-name">{{ activeDelegation(acct)?.delegateUser.fullName || activeDelegation(acct)?.delegateUser.email }}</div>
+              <div class="delegation-range">{{ formatDelegationRange(activeDelegation(acct)) }}</div>
             </div>
             <span v-else class="muted-italic">—</span>
           </td>
@@ -192,7 +201,7 @@
         </tr>
         </template>
         <tr v-if="!accounts.length">
-          <td colspan="10" class="empty-row">
+          <td colspan="12" class="empty-row">
             <div class="empty-msg">
               <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/></svg>
               <div>Không có nick nào khớp bộ lọc</div>
@@ -279,6 +288,42 @@ function onOwnerClick(account: EnrichedAccount) {
   // Chỉ owner-of-nick HOẶC org admin được reassign. BE cũng gate, FE chỉ skip UX noise.
   if (!account.canReassignOwner) return;
   emit('reassign-owner', account);
+}
+
+function responsibleUser(account: EnrichedAccount) {
+  if (account.effectivePrimary?.basePrimaryUser) return account.effectivePrimary.basePrimaryUser;
+  return account.owner;
+}
+
+function responsibleName(account: EnrichedAccount): string {
+  const user = responsibleUser(account);
+  return user?.fullName || user?.email || 'Chưa có phụ trách';
+}
+
+function activeDelegation(account: EnrichedAccount) {
+  return account.activePrimaryDelegation || (
+    account.effectivePrimary?.source === 'delegation'
+      ? account.effectivePrimary.delegation
+      : null
+  );
+}
+
+function delegationTitle(account: EnrichedAccount): string {
+  const delegation = activeDelegation(account);
+  if (!delegation) return '';
+  const delegateName = delegation.delegateUser.fullName || delegation.delegateUser.email;
+  return `Phụ trách chính đang ủy quyền cho ${delegateName} (${formatDelegationRange(delegation)})`;
+}
+
+function formatDelegationRange(delegation: ReturnType<typeof activeDelegation>): string {
+  if (!delegation) return '';
+  return `${formatDateShort(delegation.startDate)} → ${formatDateShort(delegation.endDate)}`;
+}
+
+function formatDateShort(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-');
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
 }
 
 function statusClass(live: string): string {
@@ -637,6 +682,10 @@ tbody tr.alert:hover { background: #FFF5F5 }
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
+.badge-owner.delegated {
+  background: #E0F2FE;
+  color: #075985;
+}
 .badge-self {
   font-size: 9px;
   font-weight: 700;
@@ -652,6 +701,28 @@ tbody tr.alert:hover { background: #FFF5F5 }
   background: #FEF3C7; color: #92400E;
   letter-spacing: 0.2px;
   white-space: nowrap;
+}
+
+.delegation-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+.delegation-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0F172A;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+}
+.delegation-range {
+  font-size: 11px;
+  color: #64748B;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Permission dot on crew avatar */

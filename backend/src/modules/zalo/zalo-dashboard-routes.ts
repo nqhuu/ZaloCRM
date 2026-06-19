@@ -19,6 +19,7 @@ import { getZaloScope, canManageAccount } from './zalo-scope.js';
 import { uptimeWindowBatch } from './status-log-service.js';
 import { revokeAllSessions } from '../privacy/pin-service.js';
 import { getNickDayMetricsBatch, type NickDayMetrics } from './nick-metrics-service.js';
+import { getEffectivePrimaryAssignee } from './zalo-assignment-service.js';
 
 const DAILY_QUOTA = 500; // per-nick soft cap shown in UI (msg today X / 500)
 
@@ -197,7 +198,7 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
 
     // Phase metrics layer 2026-05-22: msgToday + uptime7d cùng batch query.
     // KHÔNG dùng DailyMessageStat nữa (dead writer). lastActivity derive từ Message table.
-    const [metricsToday, uptimeMap, lastMsgRows] = await Promise.all([
+    const [metricsToday, uptimeMap, lastMsgRows, effectivePrimaryRows] = await Promise.all([
       getNickDayMetricsBatch(ids, today),
       uptimeWindowBatch(ids, 7),
       // Last message sentAt per account (proxy lastActivity)
@@ -208,10 +209,16 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
         WHERE c.zalo_account_id = ANY(${ids}::text[])
         GROUP BY c.zalo_account_id
       `,
+      Promise.all(
+        ids.map((id) => getEffectivePrimaryAssignee({ orgId: user.orgId, zaloAccountId: id })),
+      ),
     ]);
 
     const lastActivityMap = new Map<string, Date>(
       lastMsgRows.map((r) => [r.account_id, r.last_at]),
+    );
+    const effectivePrimaryMap = new Map(
+      ids.map((id, index) => [id, effectivePrimaryRows[index]]),
     );
 
     return accounts.map((a) => {
@@ -223,6 +230,7 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
       const lastActivity = lastActivityMap.get(a.id) ?? a.lastConnectedAt;
       // Owner's department — FE dùng cho cột Department + filter chip Phòng ban.
       const ownerDept = a.department ?? a.owner?.departmentMember?.department ?? null;
+      const effectivePrimary = effectivePrimaryMap.get(a.id);
 
       return {
         id: a.id,
@@ -237,6 +245,20 @@ export async function zaloDashboardRoutes(app: FastifyInstance): Promise<void> {
         createdAt: a.createdAt,
         owner: a.owner ? { id: a.owner.id, fullName: a.owner.fullName, email: a.owner.email } : null,
         ownerUserId: a.ownerUserId,
+        effectivePrimary: effectivePrimary
+          ? {
+              source: effectivePrimary.source,
+              userId: effectivePrimary.userId,
+              fullName: effectivePrimary.fullName,
+              email: effectivePrimary.email,
+              basePrimaryUserId: effectivePrimary.basePrimaryUserId,
+              basePrimaryUser: effectivePrimary.basePrimaryUser,
+              delegation: effectivePrimary.delegation,
+            }
+          : null,
+        activePrimaryDelegation: effectivePrimary?.source === 'delegation'
+          ? effectivePrimary.delegation
+          : null,
         ownerDepartment: ownerDept,
         ownerDeptRole: a.owner?.departmentMember?.deptRole ?? null,
         // Phase Privacy v2 2026-05-23 — nick là internal contact của user nào (thường = owner).

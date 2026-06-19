@@ -192,7 +192,7 @@ export async function createArchiveStory(input: CreateArchiveStoryInput) {
         priority: normalizeArchivePriority(input.priority),
         requiresConfirmation: typeof input.requiresConfirmation === 'boolean'
           ? input.requiresConfirmation
-          : conversation.requiresConfirmationDefault,
+          : conversation.requiresConfirmationDefault ?? true,
         extraNote: oneLine(input.extraNote) || null,
         recordType: oneLine(input.recordType) || departmentDefaults?.defaultArchiveRecordType || 'order',
         conversationContent: messages.map(formatArchiveMessage).join('\n'),

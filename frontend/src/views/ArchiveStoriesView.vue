@@ -712,7 +712,16 @@
       <v-card v-if="selectedStory" class="detail-card" rounded="lg">
         <v-card-title class="detail-title">
           <div class="detail-title-content">
-            <small>{{ recordTypeLabel(selectedStory.recordType) }}</small>
+            <div class="detail-title-kicker">
+              <small>{{ recordTypeLabel(selectedStory.recordType) }}</small>
+              <span class="detail-customer-chip">
+                <v-icon size="14">mdi-account-outline</v-icon>
+                <b>Khách hàng</b>
+                <span class="detail-fact-value">
+                  {{ selectedStory.customerNameSnapshot || selectedStory.conversationName || 'Chưa có khách hàng' }}
+                </span>
+              </span>
+            </div>
             <div v-if="!titleEditing" class="detail-title-row">
               <h2>{{ selectedStory.title || selectedStory.conversationName }}</h2>
               <v-btn
@@ -757,14 +766,113 @@
             <div class="detail-meta">
               <span>{{ selectedStory.department?.name || 'Chưa có phòng ban' }}</span>
               <span>{{ selectedStory.assignedUser?.fullName || 'Chưa phân công' }}</span>
+              <span class="detail-meta-priority" :style="priorityPillStyle(selectedStory.priority)">
+                <v-icon size="14">mdi-flag-outline</v-icon>
+                {{ priorityLabel(selectedStory.priority) }}
+              </span>
               <span :style="statusPillStyle(storyStatus(selectedStory))">
                 {{ storyStatus(selectedStory).name }}
+                <template v-if="storyCompletionTime(selectedStory)">
+                  · {{ storyCompletionTime(selectedStory) }}
+                </template>
               </span>
               <span v-if="storyReasonLabel(selectedStory)" class="status-reason-badge">
                 <v-icon size="14">mdi-alert-circle-outline</v-icon>
                 {{ storyReasonLabel(selectedStory) }}
               </span>
               <span>{{ backupLabel(selectedStory.backupStatus) }}</span>
+              <v-menu location="bottom start" :close-on-content-click="false">
+                <template #activator="{ props }">
+                  <button v-bind="props" type="button" class="detail-history-trigger">
+                    <v-icon size="14">mdi-history</v-icon>
+                    Lịch sử
+                    <small v-if="detailHistoryCount">{{ detailHistoryCount }}</small>
+                    <v-icon size="14">mdi-chevron-down</v-icon>
+                  </button>
+                </template>
+                <div class="detail-history-menu">
+                  <div v-if="detailHistoryView === 'menu'" class="detail-history-picker">
+                    <button type="button" @click="detailHistoryView = 'status'">
+                      <span>
+                        <v-icon size="17">mdi-flag-checkered</v-icon>
+                        Lịch sử trạng thái
+                      </span>
+                      <small>{{ selectedStory.statusHistory?.length || 0 }}</small>
+                    </button>
+                    <button type="button" @click="detailHistoryView = 'assignment'">
+                      <span>
+                        <v-icon size="17">mdi-account-switch-outline</v-icon>
+                        Lịch sử người xử lý
+                      </span>
+                      <small>{{ handoverContext?.assignmentHistory?.length || 0 }}</small>
+                    </button>
+                  </div>
+
+                  <section v-else-if="detailHistoryView === 'status'">
+                    <header class="detail-history-section-head">
+                      <button type="button" @click="detailHistoryView = 'menu'">
+                        <v-icon size="15">mdi-chevron-left</v-icon>
+                      </button>
+                      <v-icon size="15">mdi-flag-checkered</v-icon>
+                      <strong>Lịch sử trạng thái</strong>
+                    </header>
+                    <div v-if="selectedStory.statusHistory?.length" class="detail-history-list">
+                      <article
+                        v-for="entry in selectedStory.statusHistory"
+                        :key="entry.id"
+                        class="detail-history-item"
+                      >
+                        <div class="detail-history-main">
+                          <span>
+                            {{ entry.fromStatusDefinition?.name || entry.fromStatus }}
+                            <v-icon size="13">mdi-arrow-right</v-icon>
+                            {{ entry.toStatusDefinition?.name || entry.toStatus }}
+                          </span>
+                          <time>{{ formatDate(entry.createdAt) }}</time>
+                        </div>
+                        <p>
+                          <template v-if="entry.changedBy?.fullName">{{ entry.changedBy.fullName }}</template>
+                          <template v-if="entry.reasonNameSnapshot"> · {{ entry.reasonNameSnapshot }}</template>
+                          <template v-if="entry.note"> · {{ entry.note }}</template>
+                          <template v-if="entry.resultContent"> · KQ: {{ entry.resultContent }}</template>
+                        </p>
+                      </article>
+                    </div>
+                    <p v-else class="detail-history-empty">Chưa có lịch sử trạng thái.</p>
+                  </section>
+
+                  <section v-else>
+                    <header class="detail-history-section-head">
+                      <button type="button" @click="detailHistoryView = 'menu'">
+                        <v-icon size="15">mdi-chevron-left</v-icon>
+                      </button>
+                      <v-icon size="15">mdi-account-switch-outline</v-icon>
+                      <strong>Lịch sử người xử lý</strong>
+                    </header>
+                    <div v-if="handoverContext?.assignmentHistory?.length" class="detail-history-list">
+                      <article
+                        v-for="entry in handoverContext.assignmentHistory"
+                        :key="entry.id"
+                        class="detail-history-item"
+                      >
+                        <div class="detail-history-main">
+                          <span>
+                            {{ entry.fromUser?.fullName || 'Chưa phân công' }}
+                            <v-icon size="13">mdi-arrow-right</v-icon>
+                            {{ entry.toUser.fullName }}
+                          </span>
+                          <time>{{ formatDate(entry.createdAt) }}</time>
+                        </div>
+                        <p>
+                          <template v-if="entry.changedBy?.fullName">{{ entry.changedBy.fullName }}</template>
+                          <template v-if="entry.reason || entry.changeType"> · {{ entry.reason || entry.changeType }}</template>
+                        </p>
+                      </article>
+                    </div>
+                    <p v-else class="detail-history-empty">Chưa có lịch sử người xử lý.</p>
+                  </section>
+                </div>
+              </v-menu>
               <span v-if="isDeletedZaloAccount(selectedStory)" class="deleted-account-badge">
                 <v-icon size="15">mdi-account-off-outline</v-icon>
                 Tài khoản Zalo "{{ accountDisplayName(selectedStory) || 'Không rõ tên' }}" đã bị xóa
@@ -786,42 +894,6 @@
                 </span>
               </div>
             </div>
-
-            <details v-if="handoverContext?.assignmentHistory?.length" class="assignment-history">
-              <summary>Lịch sử người xử lý</summary>
-              <div
-                v-for="entry in handoverContext.assignmentHistory"
-                :key="entry.id"
-                class="assignment-history-row"
-              >
-                <span>
-                  {{ entry.fromUser?.fullName || 'Chưa phân công' }}
-                  <v-icon size="14">mdi-arrow-right</v-icon>
-                  {{ entry.toUser.fullName }}
-                </span>
-                <small>{{ formatDate(entry.createdAt) }} · {{ entry.reason || entry.changeType }}</small>
-              </div>
-            </details>
-
-            <details v-if="selectedStory.statusHistory?.length" class="assignment-history status-history">
-              <summary>Lịch sử trạng thái</summary>
-              <div
-                v-for="entry in selectedStory.statusHistory"
-                :key="entry.id"
-                class="assignment-history-row"
-              >
-                <span>
-                  {{ entry.fromStatusDefinition?.name || entry.fromStatus }}
-                  <v-icon size="14">mdi-arrow-right</v-icon>
-                  {{ entry.toStatusDefinition?.name || entry.toStatus }}
-                </span>
-                <small>
-                  {{ formatDate(entry.createdAt) }}
-                  <template v-if="entry.reasonNameSnapshot"> · {{ entry.reasonNameSnapshot }}</template>
-                  <template v-if="entry.note"> · {{ entry.note }}</template>
-                </small>
-              </div>
-            </details>
 
             <div v-if="canRemoveSelectedStoryMessages" class="message-selection-bar">
               <label>
@@ -1049,6 +1121,14 @@
             auto-select-first
             open-on-click
             no-data-text="Không tìm thấy lý do phù hợp"
+          />
+          <v-text-field
+            v-if="selectedTargetStatus?.behaviorGroup === 'completed'"
+            v-model="statusForm.orderCode"
+            label="Mã đơn hàng *"
+            variant="outlined"
+            density="comfortable"
+            placeholder="Nhập mã đơn hàng trước khi hoàn thành"
           />
           <v-textarea
             v-if="selectedTargetStatus?.requireNote || selectedTargetStatus?.behaviorGroup === 'waiting' || isReopeningSelectedStory"
@@ -1904,7 +1984,7 @@ const archiveSort = ref<{ sortBy: ArchiveSortableColumnKey; sortDir: 'asc' | 'de
   sortBy: 'priority',
   sortDir: 'desc',
 });
-const statusForm = ref({ statusDefinitionId: '', reasonId: '', resultContent: '', note: '' });
+const statusForm = ref({ statusDefinitionId: '', reasonId: '', resultContent: '', note: '', orderCode: '' });
 const statusEditForm = ref(emptyStatusEditForm());
 const configForm = ref({
   zaloAccountId: '',
@@ -1925,6 +2005,7 @@ const messageContextMenu = ref<{
   y: 0,
   message: null,
 });
+const detailHistoryView = ref<'menu' | 'status' | 'assignment'>('menu');
 
 const behaviorOptions = [
   { title: 'Đang xử lý', value: 'active' },
@@ -2456,6 +2537,10 @@ const isReopeningSelectedStory = computed(() => {
   return ['completed', 'cancelled'].includes(source.behaviorGroup)
     && source.id !== selectedTargetStatus.value.id;
 });
+const detailHistoryCount = computed(() => (
+  (selectedStory.value?.statusHistory?.length || 0)
+  + (handoverContext.value?.assignmentHistory?.length || 0)
+));
 const statusNoteLabel = computed(() => {
   if (isReopeningSelectedStory.value) return 'Lý do mở lại hồ sơ *';
   if (selectedTargetStatus.value?.behaviorGroup === 'cancelled') return 'Lý do huỷ';
@@ -2483,7 +2568,12 @@ function canUpdateStoryStatus(story: ArchiveStory) {
   return story.permissions?.canUpdateStatus ?? fallbackCanMutateStory(story);
 }
 
+function isCompletedStory(story: ArchiveStory) {
+  return story.businessStatus === 'completed' || storyStatus(story).behaviorGroup === 'completed';
+}
+
 function canEditStoryMetadata(story: ArchiveStory) {
+  if (isCompletedStory(story)) return false;
   return story.permissions?.canEditMetadata ?? fallbackCanMutateStory(story);
 }
 
@@ -2492,14 +2582,17 @@ function canRemoveStoryMessages(story: ArchiveStory) {
 }
 
 function canHandoverStory(story: ArchiveStory) {
+  if (isCompletedStory(story)) return false;
   return story.permissions?.canHandover ?? fallbackCanMutateStory(story);
 }
 
 function canOverrideAssignee(story: ArchiveStory) {
+  if (isCompletedStory(story)) return false;
   return story.permissions?.canOverrideAssignee ?? canConfigure.value;
 }
 
 function mutationDeniedMessage(story: ArchiveStory) {
+  if (isCompletedStory(story)) return 'Hồ sơ đã hoàn thành, không thể cập nhật thông tin hoặc chuyển người xử lý';
   return story.permissions?.reason || 'Bạn không có quyền thao tác hồ sơ này';
 }
 
@@ -3099,6 +3192,7 @@ function openDetail(story: ArchiveStory) {
   selectedStory.value = story;
   selectedMessageIds.value = [];
   closeMessageContextMenu();
+  detailHistoryView.value = 'menu';
   titleEditing.value = false;
   titleDraft.value = story.title || '';
   statusForm.value = {
@@ -3106,10 +3200,23 @@ function openDetail(story: ArchiveStory) {
     reasonId: story.statusReasonId || '',
     resultContent: story.resultContent || '',
     note: '',
+    orderCode: story.orderCode || '',
   };
   handoverContext.value = null;
   detailDialog.value = true;
+  void loadStoryDetail(story.id);
   void loadHandoverContext(story.id);
+}
+
+async function loadStoryDetail(storyId: string) {
+  try {
+    const { data } = await api.get(`/archive/stories/${storyId}`);
+    if (selectedStory.value?.id !== storyId) return;
+    selectedStory.value = data;
+    replaceStory(data);
+  } catch (error) {
+    console.warn('[archive-detail] load story detail failed', error);
+  }
 }
 
 function closeMessageContextMenu() {
@@ -3385,6 +3492,7 @@ function openStatusDialog(story: ArchiveStory | null) {
     reasonId: story.statusReasonId || '',
     resultContent: story.resultContent || '',
     note: '',
+    orderCode: story.orderCode || '',
   };
   statusDialog.value = true;
 }
@@ -3570,6 +3678,13 @@ async function saveStatus(statusDefinitionId?: string) {
     toast.error('Vui lòng chọn lý do cho trạng thái này');
     return;
   }
+  if (
+    selectedTargetStatus.value?.behaviorGroup === 'completed'
+    && !statusForm.value.orderCode.trim()
+  ) {
+    toast.error('Vui lòng nhập mã đơn hàng trước khi hoàn thành hồ sơ');
+    return;
+  }
   statusSaving.value = true;
   try {
     const payload = {
@@ -3577,6 +3692,9 @@ async function saveStatus(statusDefinitionId?: string) {
       reasonId: statusForm.value.reasonId || null,
       resultContent: statusForm.value.resultContent,
       note: statusForm.value.note,
+      orderCode: selectedTargetStatus.value?.behaviorGroup === 'completed'
+        ? statusForm.value.orderCode.trim()
+        : undefined,
     };
     const { data } = await api.patch(`/archive/stories/${selectedStory.value.id}/status`, payload);
     if (filters.value.status && filters.value.status !== data.story.statusDefinition?.id) {
@@ -3588,6 +3706,7 @@ async function saveStatus(statusDefinitionId?: string) {
     selectedStory.value = data.story;
     statusDialog.value = false;
     toast.success(data.message || 'Đã cập nhật trạng thái');
+    void loadStoryDetail(data.story.id);
     await fetchStories();
   } catch (error: any) {
     toast.error(error?.response?.data?.error || 'Không thể cập nhật trạng thái');
@@ -3608,6 +3727,7 @@ async function quickChangeStatus(story: ArchiveStory, statusDefinitionId: string
     reasonId: '',
     resultContent: story.resultContent || '',
     note: '',
+    orderCode: story.orderCode || '',
   };
   const target = statusDefinitions.value.find((status) => status.id === statusDefinitionId);
   const source = storyStatus(story);
@@ -3616,7 +3736,14 @@ async function quickChangeStatus(story: ArchiveStory, statusDefinitionId: string
     && ['completed', 'cancelled'].includes(source.behaviorGroup)
     && source.id !== target.id,
   );
-  if (target?.requireNote || target?.requireResult || target?.requireReason || (target?.reasons || []).some((reason) => reason.isActive) || isReopening) {
+  if (
+    (target?.behaviorGroup === 'completed' && !story.orderCode?.trim())
+    || target?.requireNote
+    || target?.requireResult
+    || target?.requireReason
+    || (target?.reasons || []).some((reason) => reason.isActive)
+    || isReopening
+  ) {
     statusDialog.value = true;
     return;
   }
@@ -3848,9 +3975,8 @@ function priorityLabel(value?: string | null) {
 }
 
 function confirmationLabel(value?: boolean | null) {
-  if (value === true) return 'Có';
   if (value === false) return 'Không';
-  return 'Chưa cài đặt';
+  return 'Có';
 }
 
 function storyStatus(story: ArchiveStory): ArchiveStatusDefinition {
@@ -4790,6 +4916,41 @@ footer {
 .detail-title { display: flex; justify-content: space-between; align-items: start; padding: 22px 24px; border-bottom: 1px solid #e5e7eb; }
 .detail-title small { display: inline-block; padding: 4px 8px; border-radius: 3px; background: #eef2ff; color: #3451a3; font-size: 10px; font-weight: 800; }
 .detail-title h2 { margin: 8px 0 0; color: #171717; font-size: 27px; font-weight: 800; }
+.detail-title-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  max-width: 100%;
+}
+.detail-customer-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(100%, 340px);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.detail-customer-chip b {
+  flex: 0 0 auto;
+  color: #0f172a;
+  font-weight: 800;
+}
+.detail-customer-chip :deep(.v-icon) {
+  flex: 0 0 auto;
+}
+.detail-fact-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .detail-body { padding: 0 !important; background: #f8f9fb; }
 .detail-sticky-top {
   position: sticky;
@@ -4800,6 +4961,154 @@ footer {
 }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 16px 24px; border-bottom: 1px solid #e5e7eb; }
 .detail-meta span { padding: 5px 11px; border: 1px solid #dde3ec; border-radius: 999px; background: #f0f3f7; color: #536176; font-size: 11px; }
+.detail-meta .detail-meta-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+}
+.detail-history-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.detail-history-trigger:hover {
+  border-color: #b7c4d8;
+  background: #f8fafc;
+}
+.detail-history-trigger small {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: #174ea6;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+.detail-history-menu {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 120px));
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, .18);
+}
+.detail-history-picker {
+  display: grid;
+  gap: 8px;
+}
+.detail-history-picker button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #e5edf7;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+}
+.detail-history-picker button:hover {
+  border-color: #bfd1ea;
+  background: #f1f6ff;
+}
+.detail-history-picker span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.detail-history-picker small {
+  min-width: 24px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: #174ea6;
+  font-size: 11px;
+  text-align: center;
+}
+.detail-history-menu section + section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #edf2f7;
+}
+.detail-history-menu header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: #0f172a;
+  font-size: 12px;
+}
+.detail-history-section-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+}
+.detail-history-section-head button:hover {
+  border-color: #bfd1ea;
+  background: #f8fafc;
+  color: #0f172a;
+}
+.detail-history-list {
+  display: grid;
+  gap: 8px;
+}
+.detail-history-item {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid #e5edf7;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.detail-history-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.detail-history-main span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+.detail-history-main time {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 600;
+}
+.detail-history-item p,
+.detail-history-empty {
+  margin: 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.45;
+}
 .detail-meta .status-reason-badge {
   display: inline-flex;
   align-items: center;

@@ -1,6 +1,7 @@
 import type { Action } from '../rbac/permission-types.js';
 import { prisma } from '../../shared/database/prisma-client.js';
 import { userHasGrant } from '../rbac/permission-group-service.js';
+import { getEffectivePrimaryAssignee } from '../zalo/zalo-assignment-service.js';
 
 export interface ArchiveActor {
   id: string;
@@ -151,16 +152,23 @@ export async function archiveStoryPermissions(
   ]);
   const canOverrideAssignee = ['owner', 'admin'].includes(actor.role)
     || (canEdit && await isArchiveDepartmentManager(actor, story.departmentId));
+  const isCompleted = story.businessStatus === 'completed'
+    || story.statusDefinition?.behaviorGroup === 'completed';
+  const completedReason = 'Hồ sơ đã hoàn thành, không thể cập nhật thông tin hoặc chuyển người xử lý';
   return {
     canView: true,
     canUpdateStatus: canEdit,
     canAppendMessages: canAppend,
-    canEditMetadata: canEdit,
+    canEditMetadata: canEdit && !isCompleted,
     canRemoveMessages: canEdit,
     canDeleteStory: canDelete,
-    canHandover: canEdit,
-    canOverrideAssignee,
-    reason: canEdit ? undefined : 'Chỉ người xử lý hoặc trưởng phòng quản lý hồ sơ mới được thao tác',
+    canHandover: canEdit && !isCompleted,
+    canOverrideAssignee: canOverrideAssignee && !isCompleted,
+    reason: isCompleted
+      ? completedReason
+      : canEdit
+        ? undefined
+        : 'Chỉ người xử lý hoặc trưởng phòng quản lý hồ sơ mới được thao tác',
   };
 }
 
@@ -298,6 +306,7 @@ export async function getArchiveSaveContext(actor: ArchiveActor, conversationId?
         requiresConfirmationUpdatedAt: true,
         zaloAccount: {
           select: {
+            id: true,
             department: {
               select: { id: true, name: true, path: true, defaultArchiveRecordType: true },
             },
@@ -314,11 +323,17 @@ export async function getArchiveSaveContext(actor: ArchiveActor, conversationId?
     });
     conversationConfirmationDefault = conversation?.requiresConfirmationDefault ?? null;
     conversationConfirmationUpdatedAt = conversation?.requiresConfirmationUpdatedAt ?? null;
-    const primary = conversation?.zaloAccount.access[0]?.user;
+    const effectivePrimary = conversation?.zaloAccount.id
+      ? await getEffectivePrimaryAssignee({
+          orgId: actor.orgId,
+          zaloAccountId: conversation.zaloAccount.id,
+        })
+      : null;
+    const primary = effectivePrimary?.user || conversation?.zaloAccount.access[0]?.user;
     if (canAssignOthers && conversation?.zaloAccount.department) {
       defaultDepartment = conversation.zaloAccount.department;
     }
-    if (canAssignOthers && primary?.isActive) {
+    if (canAssignOthers && primary && users.some((item) => item.id === primary.id)) {
       defaultAssignedUser = { id: primary.id, fullName: primary.fullName };
     }
   }

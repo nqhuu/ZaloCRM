@@ -178,9 +178,50 @@ const currentUserName = computed(() => authStore.user?.fullName || 'Tôi');
 const currentUserId = computed(() => authStore.user?.id || '');
 const showFolderManagePopup = ref(false);
 const CHAT_ACCOUNT_FILTER_STORAGE_KEY_PREFIX = 'zalocrm.chat.accountFilter';
+const CHAT_ZALO_TAG_ALL_SCOPE_KEY = '__all__';
+const scopedZaloTagSelections = ref<Record<string, {
+  tagsZalo: string[];
+  zaloLabelMode: 'or' | 'and';
+}>>({});
 
 function chatAccountFilterStorageKey(): string {
   return `${CHAT_ACCOUNT_FILTER_STORAGE_KEY_PREFIX}:${currentUserId.value || 'default'}`;
+}
+
+function zaloTagScopeKey(accountId: string | null | undefined): string {
+  return accountId || CHAT_ZALO_TAG_ALL_SCOPE_KEY;
+}
+
+function isNativeZaloLabelToken(value: string): boolean {
+  return /^[^:\s]+:\d+$/.test(value);
+}
+
+function nativeZaloLabelAccountId(value: string): string | null {
+  return isNativeZaloLabelToken(value) ? value.split(':', 1)[0] || null : null;
+}
+
+function saveCurrentZaloTagScope(accountId: string | null | undefined = accountFilter.value) {
+  scopedZaloTagSelections.value[zaloTagScopeKey(accountId)] = {
+    tagsZalo: [...inboxFilters.state.tagsZalo],
+    zaloLabelMode: inboxFilters.state.zaloLabelMode,
+  };
+}
+
+function applyZaloTagScope(accountId: string | null | undefined) {
+  const scopeKey = zaloTagScopeKey(accountId);
+  const saved = scopedZaloTagSelections.value[scopeKey];
+  const nextTags = saved
+    ? [...saved.tagsZalo]
+    : accountId
+      ? inboxFilters.state.tagsZalo.filter((tag) => (
+          !isNativeZaloLabelToken(tag) || nativeZaloLabelAccountId(tag) === accountId
+        ))
+      : [];
+  inboxFilters.state.tagsZalo = nextTags;
+  inboxFilters.state.zaloLabelMode = nextTags.filter(isNativeZaloLabelToken).length > 1
+    ? saved?.zaloLabelMode || inboxFilters.state.zaloLabelMode
+    : 'or';
+  inboxFilters.activePresetId.value = null;
 }
 
 function persistChatAccountFilter(id: string | null) {
@@ -193,9 +234,12 @@ function persistChatAccountFilter(id: string | null) {
   }
 }
 
-function setChatAccountFilter(id: string | null, persist = true) {
+function setChatAccountFilter(id: string | null, persist = true, syncZaloTags = true) {
+  const previousAccountId = accountFilter.value || null;
+  if (syncZaloTags && previousAccountId !== id) saveCurrentZaloTagScope(previousAccountId);
   accountFilter.value = id;
   selectedAccountIds.value = id ? [id] : [];
+  if (syncZaloTags && previousAccountId !== id) applyZaloTagScope(id);
   if (persist) persistChatAccountFilter(id);
 }
 
@@ -206,7 +250,7 @@ function restoreChatAccountFilter() {
     if (!savedAccountId) return;
     const accountExists = zaloAccounts.value.some((account) => account.id === savedAccountId);
     if (accountExists) {
-      setChatAccountFilter(savedAccountId, false);
+      setChatAccountFilter(savedAccountId, false, false);
       return;
     }
     window.localStorage.removeItem(chatAccountFilterStorageKey());
@@ -367,12 +411,14 @@ function onTyping() {
 }
 function onFilterAccount(id: string | null) {
   setChatAccountFilter(id);
-  fetchConversations();
+  extraFilters.value = inboxFilters.buildQueryParams();
+  fetchConversations({ bypassCache: true });
 }
 function onFolderViewApplied(payload: { folderId: string | null; accountId: string | null }) {
   inboxFilters.setFolder(payload.folderId);
   setChatAccountFilter(payload.accountId);
-  fetchConversations();
+  extraFilters.value = inboxFilters.buildQueryParams();
+  fetchConversations({ bypassCache: true });
 }
 function onFiltersUpdate(params: Record<string, string>) {
   extraFilters.value = { ...extraFilters.value, ...params };

@@ -156,6 +156,26 @@
           </div>
         </section>
 
+        <section class="d-section">
+          <div class="h"><span>Ủy quyền phụ trách</span></div>
+          <div v-if="activeDelegation(account)" class="delegation-detail">
+            <div class="avatar-mini" :style="{ background: avatarColor(activeDelegationName(account), 1) }">
+              {{ shortName(activeDelegationName(account)) }}
+            </div>
+            <div class="nm-col">
+              <div class="nm">{{ activeDelegationName(account) }}</div>
+              <div class="em">
+                {{ formatDelegationRange(activeDelegation(account)) }}
+                <span v-if="activeDelegation(account)?.reason"> · {{ activeDelegation(account)?.reason }}</span>
+              </div>
+            </div>
+            <span class="role-chip delegation">Đang ủy quyền</span>
+          </div>
+          <div v-else class="delegation-empty">
+            Không có ủy quyền đang hiệu lực. Hồ sơ mới mặc định về phụ trách chính.
+          </div>
+        </section>
+
         <!-- CREW LIST -->
         <section class="d-section">
           <div class="h">
@@ -269,6 +289,30 @@ function formatNum(n: number | null | undefined): string {
 function acceptRate(m: { friendReqSent: number; friendReqAccepted: number }): number {
   if (!m.friendReqSent) return 0;
   return Math.round((m.friendReqAccepted / m.friendReqSent) * 100);
+}
+
+function activeDelegation(account: EnrichedAccount) {
+  return account.activePrimaryDelegation || (
+    account.effectivePrimary?.source === 'delegation'
+      ? account.effectivePrimary.delegation
+      : null
+  );
+}
+
+function activeDelegationName(account: EnrichedAccount): string {
+  const delegation = activeDelegation(account);
+  return delegation?.delegateUser.fullName || delegation?.delegateUser.email || '';
+}
+
+function formatDelegationRange(delegation: ReturnType<typeof activeDelegation>): string {
+  if (!delegation) return '';
+  return `${formatDateShort(delegation.startDate)} → ${formatDateShort(delegation.endDate)}`;
+}
+
+function formatDateShort(value: string): string {
+  const [year, month, day] = value.slice(0, 10).split('-');
+  if (!year || !month || !day) return value;
+  return `${day}/${month}/${year}`;
 }
 
 function statusClass(live: string): string {
@@ -570,6 +614,25 @@ function maskPhone(p: string): string {
 }
 .role-chip.leader { background: #DBEAFE; color: #1D4ED8; }
 .role-chip.deputy { background: #FEF3C7; color: #92400E; }
+.role-chip.delegation { background: #E0F2FE; color: #075985; }
+
+.delegation-detail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #F0F9FF;
+  border: 1px solid #BAE6FD;
+  border-radius: 8px;
+}
+.delegation-empty {
+  padding: 10px 12px;
+  background: #F9FAFB;
+  border: 1px solid #F3F4F6;
+  border-radius: 8px;
+  color: #6B7280;
+  font-size: 12px;
+}
 
 /* Phase metrics layer 2026-05-22 — Số liệu hôm nay block */
 .metrics-group { margin-bottom: 14px; }
