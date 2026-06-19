@@ -6,6 +6,7 @@ export type ArchiveStatusBehavior = (typeof ARCHIVE_STATUS_BEHAVIORS)[number];
 
 const COLOR_TOKENS = new Set(['primary', 'warning', 'success', 'error', 'neutral', 'info']);
 const CODE_PATTERN = /^[a-z][a-z0-9_]{1,49}$/;
+const REASON_CODE_PATTERN = /^[a-z][a-z0-9_-]{1,63}$/;
 
 const DEFAULT_STATUSES = [
   {
@@ -22,6 +23,7 @@ const DEFAULT_STATUSES = [
     autoSyncReplies: true,
     requireNote: false,
     requireResult: false,
+    requireReason: false,
   },
   {
     code: 'needs_info',
@@ -37,6 +39,7 @@ const DEFAULT_STATUSES = [
     autoSyncReplies: true,
     requireNote: true,
     requireResult: false,
+    requireReason: false,
   },
   {
     code: 'completed',
@@ -52,6 +55,7 @@ const DEFAULT_STATUSES = [
     autoSyncReplies: false,
     requireNote: false,
     requireResult: true,
+    requireReason: false,
   },
   {
     code: 'cancelled',
@@ -67,6 +71,7 @@ const DEFAULT_STATUSES = [
     autoSyncReplies: false,
     requireNote: true,
     requireResult: false,
+    requireReason: true,
   },
 ] as const;
 
@@ -87,9 +92,18 @@ export interface ArchiveStatusInput {
   autoSyncReplies?: boolean;
   requireNote?: boolean;
   requireResult?: boolean;
+  requireReason?: boolean;
   isActive?: boolean;
   transitionToIds?: string[];
   confirmBehaviorChange?: boolean;
+}
+
+export interface ArchiveStatusReasonInput {
+  code?: string;
+  name?: string;
+  description?: string | null;
+  displayOrder?: number;
+  isActive?: boolean;
 }
 
 export async function ensureArchiveDefaultStatuses(orgId: string) {
@@ -165,6 +179,9 @@ export async function listArchiveStatusDefinitions(input: {
       transitionsFrom: {
         where: { isActive: true },
         select: { toStatusId: true, requiredPermission: true },
+      },
+      reasons: {
+        orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
       },
       _count: { select: { stories: true } },
     },
@@ -270,6 +287,7 @@ export async function createArchiveStatusDefinition(input: {
         autoSyncReplies: data.autoSyncReplies,
         requireNote: data.requireNote,
         requireResult: data.requireResult,
+        requireReason: data.requireReason,
         isSystem: false,
         isActive: data.isActive,
       },
@@ -328,6 +346,7 @@ export async function updateArchiveStatusDefinition(input: {
     autoSyncReplies: input.data.autoSyncReplies ?? existing.autoSyncReplies,
     requireNote: input.data.requireNote ?? existing.requireNote,
     requireResult: input.data.requireResult ?? existing.requireResult,
+    requireReason: input.data.requireReason ?? existing.requireReason,
     isActive: input.data.isActive ?? existing.isActive,
   };
   if (!updateData.isActive && updateData.isDefault) {
@@ -406,6 +425,9 @@ export async function getArchiveStatusDefinition(orgId: string, statusId: string
       transitionsFrom: {
         where: { isActive: true },
         select: { toStatusId: true, requiredPermission: true },
+      },
+      reasons: {
+        orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
       },
       _count: { select: { stories: true } },
     },
@@ -497,6 +519,7 @@ function normalizeStatusInput(data: ArchiveStatusInput, requireIdentity: boolean
       behaviorGroup === 'cancelled' || behaviorGroup === 'waiting'
     ),
     requireResult: data.requireResult ?? behaviorGroup === 'completed',
+    requireReason: data.requireReason ?? behaviorGroup === 'cancelled',
     isActive: data.isActive ?? true,
   };
 }
@@ -631,7 +654,9 @@ function integerValue(value: unknown, fallback: number) {
 }
 
 function normalizeColor(value: string) {
-  return COLOR_TOKENS.has(value) ? value : 'primary';
+  const normalized = String(value || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) return normalized.toLowerCase();
+  return COLOR_TOKENS.has(normalized) ? normalized : 'primary';
 }
 
 function defaultColor(behavior: ArchiveStatusBehavior) {
@@ -650,6 +675,216 @@ function defaultIcon(behavior: ArchiveStatusBehavior) {
     completed: 'mdi-check-circle-outline',
     cancelled: 'mdi-cancel',
   } as const)[behavior];
+}
+
+export async function createArchiveStatusReason(input: {
+  orgId: string;
+  userId: string;
+  statusId: string;
+  data: ArchiveStatusReasonInput;
+}) {
+  const status = await getReasonStatus(input.orgId, input.statusId);
+  const data = normalizeReasonInput(input.data, true, status.nextOrder);
+  const duplicate = await prisma.archiveStatusReason.findFirst({
+    where: { statusDefinitionId: status.id, code: data.code! },
+    select: { id: true },
+  });
+  if (duplicate) throw new ArchiveStatusError('Mã lý do đã tồn tại trong trạng thái này', 409);
+  return prisma.archiveStatusReason.create({
+    data: {
+      orgId: input.orgId,
+      statusDefinitionId: status.id,
+      createdByUserId: input.userId,
+      code: data.code!,
+      name: data.name!,
+      description: data.description,
+      displayOrder: data.displayOrder!,
+      isActive: data.isActive ?? true,
+    },
+  });
+}
+
+export async function updateArchiveStatusReason(input: {
+  orgId: string;
+  reasonId: string;
+  data: ArchiveStatusReasonInput;
+}) {
+  const existing = await prisma.archiveStatusReason.findFirst({
+    where: { id: input.reasonId, orgId: input.orgId },
+  });
+  if (!existing) throw new ArchiveStatusError('Không tìm thấy lý do trạng thái', 404);
+  const data = normalizeReasonInput(input.data, false, existing.displayOrder);
+  if (data.code && data.code !== existing.code) {
+    const duplicate = await prisma.archiveStatusReason.findFirst({
+      where: {
+        statusDefinitionId: existing.statusDefinitionId,
+        code: data.code,
+        id: { not: existing.id },
+      },
+      select: { id: true },
+    });
+    if (duplicate) throw new ArchiveStatusError('Mã lý do đã tồn tại trong trạng thái này', 409);
+  }
+  return prisma.archiveStatusReason.update({
+    where: { id: existing.id },
+    data,
+  });
+}
+
+export async function deleteOrDeactivateArchiveStatusReason(input: {
+  orgId: string;
+  reasonId: string;
+}) {
+  const reason = await prisma.archiveStatusReason.findFirst({
+    where: { id: input.reasonId, orgId: input.orgId },
+    include: {
+      _count: {
+        select: {
+          stories: true,
+          statusHistory: true,
+        },
+      },
+    },
+  });
+  if (!reason) throw new ArchiveStatusError('Không tìm thấy lý do trạng thái', 404);
+  if (reason._count.stories > 0 || reason._count.statusHistory > 0) {
+    const updated = await prisma.archiveStatusReason.update({
+      where: { id: reason.id },
+      data: { isActive: false },
+    });
+    return { reason: updated, mode: 'deactivated' as const };
+  }
+  await prisma.archiveStatusReason.delete({ where: { id: reason.id } });
+  return { reason, mode: 'deleted' as const };
+}
+
+export async function reorderArchiveStatusReasons(input: {
+  orgId: string;
+  statusId: string;
+  reasonIds: string[];
+}) {
+  const ids = [...new Set(input.reasonIds.filter(Boolean))];
+  const reasons = await prisma.archiveStatusReason.findMany({
+    where: { orgId: input.orgId, statusDefinitionId: input.statusId, id: { in: ids } },
+    select: { id: true },
+  });
+  if (reasons.length !== ids.length) throw new ArchiveStatusError('Danh sách lý do không hợp lệ');
+  await prisma.$transaction(
+    ids.map((id, index) => prisma.archiveStatusReason.update({
+      where: { id },
+      data: { displayOrder: (index + 1) * 10 },
+    })),
+  );
+}
+
+export async function importArchiveStatusReasons(input: {
+  orgId: string;
+  userId: string;
+  statusId: string;
+  rows: Array<{ code?: unknown; name?: unknown }>;
+}) {
+  const status = await getReasonStatus(input.orgId, input.statusId);
+  const existing = await prisma.archiveStatusReason.findMany({
+    where: { orgId: input.orgId, statusDefinitionId: status.id },
+  });
+  const byCode = new Map(existing.map((reason) => [reason.code, reason]));
+  const seen = new Set<string>();
+  const errors: Array<{ row: number; error: string }> = [];
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  let nextOrder = status.nextOrder;
+
+  for (const [index, row] of input.rows.entries()) {
+    const rowNumber = index + 2;
+    try {
+      const normalized = normalizeReasonInput({
+        code: String(row.code || ''),
+        name: String(row.name || ''),
+        displayOrder: nextOrder,
+        isActive: true,
+      }, true, nextOrder);
+      const code = normalized.code!;
+      if (seen.has(code)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(code);
+      const current = byCode.get(code);
+      if (current) {
+        await prisma.archiveStatusReason.update({
+          where: { id: current.id },
+          data: { name: normalized.name!, isActive: true },
+        });
+        updated += 1;
+      } else {
+        await prisma.archiveStatusReason.create({
+          data: {
+            orgId: input.orgId,
+            statusDefinitionId: status.id,
+            createdByUserId: input.userId,
+            code,
+            name: normalized.name!,
+            displayOrder: nextOrder,
+            isActive: true,
+          },
+        });
+        created += 1;
+        nextOrder += 10;
+      }
+    } catch (error) {
+      errors.push({ row: rowNumber, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  return { created, updated, skipped, errors };
+}
+
+async function getReasonStatus(orgId: string, statusId: string) {
+  const status = await prisma.archiveStatusDefinition.findFirst({
+    where: { id: statusId, orgId },
+    include: { reasons: { orderBy: { displayOrder: 'desc' }, take: 1 } },
+  });
+  if (!status) throw new ArchiveStatusError('Không tìm thấy trạng thái', 404);
+  return {
+    ...status,
+    nextOrder: (status.reasons[0]?.displayOrder || 0) + 10,
+  };
+}
+
+function normalizeReasonInput(
+  data: ArchiveStatusReasonInput,
+  requireIdentity: boolean,
+  fallbackOrder: number,
+) {
+  const result: {
+    code?: string;
+    name?: string;
+    description?: string | null;
+    displayOrder?: number;
+    isActive?: boolean;
+  } = {};
+  if (data.code !== undefined || requireIdentity) {
+    const code = normalizeReasonCode(cleanRequired(data.code, 'Mã lý do'));
+    if (!REASON_CODE_PATTERN.test(code)) {
+      throw new ArchiveStatusError('Mã lý do chỉ gồm chữ thường, số, dấu gạch dưới/gạch ngang và dài 2-64 ký tự');
+    }
+    result.code = code;
+  }
+  if (data.name !== undefined || requireIdentity) result.name = cleanRequired(data.name, 'Tên lý do');
+  if (data.description !== undefined) result.description = cleanOptional(data.description);
+  result.displayOrder = integerValue(data.displayOrder, fallbackOrder);
+  if (data.isActive !== undefined) result.isActive = data.isActive;
+  return result;
+}
+
+export function normalizeReasonCode(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^[_-]+|[_-]+$/g, '');
 }
 
 export class ArchiveStatusError extends Error {

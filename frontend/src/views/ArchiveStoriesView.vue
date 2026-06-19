@@ -254,7 +254,20 @@
                   :key="column.key"
                   :class="column.className"
                 >
-                  {{ column.label }}
+                  <button
+                    v-if="isSortableArchiveColumn(column.key)"
+                    class="archive-sort-header"
+                    type="button"
+                    :class="{ active: archiveSort.sortBy === column.key }"
+                    :title="archiveSortTitle(column.key)"
+                    @click="toggleArchiveSort(column.key)"
+                  >
+                    <span>{{ column.label }}</span>
+                    <v-icon size="14">{{ archiveSortIcon(column.key) }}</v-icon>
+                  </button>
+                  <template v-else>
+                    {{ column.label }}
+                  </template>
                 </th>
               </tr>
             </thead>
@@ -747,6 +760,10 @@
               <span :style="statusPillStyle(storyStatus(selectedStory))">
                 {{ storyStatus(selectedStory).name }}
               </span>
+              <span v-if="storyReasonLabel(selectedStory)" class="status-reason-badge">
+                <v-icon size="14">mdi-alert-circle-outline</v-icon>
+                {{ storyReasonLabel(selectedStory) }}
+              </span>
               <span>{{ backupLabel(selectedStory.backupStatus) }}</span>
               <span v-if="isDeletedZaloAccount(selectedStory)" class="deleted-account-badge">
                 <v-icon size="15">mdi-account-off-outline</v-icon>
@@ -783,6 +800,26 @@
                   {{ entry.toUser.fullName }}
                 </span>
                 <small>{{ formatDate(entry.createdAt) }} · {{ entry.reason || entry.changeType }}</small>
+              </div>
+            </details>
+
+            <details v-if="selectedStory.statusHistory?.length" class="assignment-history status-history">
+              <summary>Lịch sử trạng thái</summary>
+              <div
+                v-for="entry in selectedStory.statusHistory"
+                :key="entry.id"
+                class="assignment-history-row"
+              >
+                <span>
+                  {{ entry.fromStatusDefinition?.name || entry.fromStatus }}
+                  <v-icon size="14">mdi-arrow-right</v-icon>
+                  {{ entry.toStatusDefinition?.name || entry.toStatus }}
+                </span>
+                <small>
+                  {{ formatDate(entry.createdAt) }}
+                  <template v-if="entry.reasonNameSnapshot"> · {{ entry.reasonNameSnapshot }}</template>
+                  <template v-if="entry.note"> · {{ entry.note }}</template>
+                </small>
               </div>
             </details>
 
@@ -999,6 +1036,20 @@
             item-value="id"
             label="Trạng thái"
           />
+          <v-autocomplete
+            v-if="selectedTargetReasonOptions.length"
+            v-model="statusForm.reasonId"
+            :items="selectedTargetReasonOptions"
+            :custom-filter="statusReasonFilter"
+            item-title="name"
+            item-value="id"
+            :label="selectedTargetStatus?.requireReason ? 'Lý do *' : 'Lý do'"
+            variant="outlined"
+            clearable
+            auto-select-first
+            open-on-click
+            no-data-text="Không tìm thấy lý do phù hợp"
+          />
           <v-textarea
             v-if="selectedTargetStatus?.requireNote || selectedTargetStatus?.behaviorGroup === 'waiting' || isReopeningSelectedStory"
             v-model="statusForm.note"
@@ -1092,14 +1143,24 @@
                   variant="outlined"
                   @update:model-value="handleStatusBehaviorChange"
                 />
-                <v-select
-                  v-model="statusEditForm.colorToken"
-                  :items="colorOptions"
-                  item-title="title"
-                  item-value="value"
-                  label="Màu"
-                  variant="outlined"
-                />
+                <div class="status-color-controls">
+                  <v-select
+                    v-model="statusEditForm.colorToken"
+                    :items="colorOptions"
+                    item-title="title"
+                    item-value="value"
+                    label="Màu nhanh"
+                    variant="outlined"
+                  />
+                  <label class="status-color-wheel">
+                    <span>Màu tuỳ chọn</span>
+                    <input
+                      :value="colorInputValue(statusEditForm.colorToken)"
+                      type="color"
+                      @input="updateStatusCustomColor"
+                    />
+                  </label>
+                </div>
               </div>
               <v-select
                 v-model="statusEditForm.departmentId"
@@ -1136,8 +1197,99 @@
                 <v-switch v-model="statusEditForm.autoSyncReplies" label="Tự đồng bộ trả lời" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.requireNote" label="Yêu cầu ghi chú" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.requireResult" label="Yêu cầu kết quả" color="primary" hide-details />
+                <v-switch v-model="statusEditForm.requireReason" label="Yêu cầu lý do" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.isActive" label="Đang sử dụng" color="primary" hide-details />
               </div>
+              <section class="status-reason-manager">
+                <div class="status-reason-head">
+                  <div>
+                    <strong>Lý do của trạng thái</strong>
+                    <span>Mỗi lý do có mã riêng để phục vụ báo cáo.</span>
+                  </div>
+                  <div class="status-reason-tools">
+                    <input
+                      ref="statusReasonImportInput"
+                      type="file"
+                      accept=".xlsx,.xls"
+                      hidden
+                      @change="importStatusReasons"
+                    />
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      prepend-icon="mdi-file-excel-outline"
+                      :disabled="!editingStatusId"
+                      :loading="statusReasonImporting"
+                      @click="statusReasonImportInput?.click()"
+                    >
+                      Nhập Excel
+                    </v-btn>
+                  </div>
+                </div>
+                <p v-if="!editingStatusId" class="status-reason-empty">
+                  Lưu trạng thái trước khi thêm lý do.
+                </p>
+                <template v-else>
+                  <div class="status-reason-create">
+                    <v-text-field
+                      v-model="statusReasonDraft.code"
+                      label="Mã lý do"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                      @update:model-value="statusReasonDraft.code = normalizeReasonKey(String($event || ''))"
+                    />
+                    <v-text-field
+                      v-model="statusReasonDraft.name"
+                      label="Tên lý do"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                    />
+                    <v-btn
+                      color="primary"
+                      variant="tonal"
+                      size="small"
+                      :loading="statusReasonSaving"
+                      @click="addStatusReason"
+                    >
+                      Thêm
+                    </v-btn>
+                  </div>
+                  <div v-if="statusReasonRows.length" class="status-reason-list">
+                    <article
+                      v-for="(reason, index) in statusReasonRows"
+                      :key="reason.id"
+                      class="status-reason-row"
+                      :class="{ inactive: !reason.isActive }"
+                    >
+                      <v-text-field
+                        v-model="reason.code"
+                        label="Mã"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                        @update:model-value="reason.code = normalizeReasonKey(String($event || ''))"
+                      />
+                      <v-text-field
+                        v-model="reason.name"
+                        label="Tên lý do"
+                        variant="outlined"
+                        density="compact"
+                        hide-details
+                      />
+                      <v-switch v-model="reason.isActive" color="primary" density="compact" hide-details label="Dùng" />
+                      <div class="status-reason-actions">
+                        <v-btn icon="mdi-chevron-up" size="x-small" variant="text" :disabled="index === 0" @click="moveStatusReason(index, -1)" />
+                        <v-btn icon="mdi-chevron-down" size="x-small" variant="text" :disabled="index === statusReasonRows.length - 1" @click="moveStatusReason(index, 1)" />
+                        <v-btn icon="mdi-content-save-outline" size="x-small" variant="text" :loading="statusReasonSaving" @click="saveStatusReason(reason)" />
+                        <v-btn icon="mdi-delete-outline" size="x-small" variant="text" color="error" :loading="statusReasonSaving" @click="removeStatusReason(reason)" />
+                      </div>
+                    </article>
+                  </div>
+                  <p v-else class="status-reason-empty">Chưa có lý do nào cho trạng thái này.</p>
+                </template>
+              </section>
               <div class="status-manager-form-actions">
                 <v-btn
                   v-if="editingStatusId"
@@ -1461,11 +1613,37 @@ interface ArchiveStatusDefinition {
   autoSyncReplies: boolean;
   requireNote: boolean;
   requireResult: boolean;
+  requireReason: boolean;
   isSystem: boolean;
   isActive: boolean;
+  reasons?: ArchiveStatusReason[];
   allowedTransitionIds?: string[];
   transitionsFrom?: Array<{ toStatusId: string; requiredPermission?: string | null }>;
   _count?: { stories: number };
+}
+
+interface ArchiveStatusReason {
+  id: string;
+  statusDefinitionId: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  displayOrder: number;
+  isActive: boolean;
+}
+
+interface ArchiveStatusHistory {
+  id: string;
+  fromStatus: string;
+  toStatus: string;
+  reasonNameSnapshot?: string | null;
+  reasonCodeSnapshot?: string | null;
+  note?: string | null;
+  resultContent?: string | null;
+  createdAt: string;
+  changedBy?: ArchiveHandoverUser;
+  fromStatusDefinition?: ArchiveStatusDefinition | null;
+  toStatusDefinition?: ArchiveStatusDefinition | null;
 }
 
 interface ArchiveStoryPermissions {
@@ -1500,6 +1678,9 @@ interface ArchiveStory {
   resultContent?: string | null;
   businessStatus: string;
   statusDefinition?: ArchiveStatusDefinition | null;
+  statusReasonId?: string | null;
+  statusReasonCodeSnapshot?: string | null;
+  statusReasonNameSnapshot?: string | null;
   backupStatus: string;
   backupError?: string | null;
   completedAt?: string | null;
@@ -1518,6 +1699,7 @@ interface ArchiveStory {
   permissions?: ArchiveStoryPermissions;
   messages: ArchiveMessage[];
   transferRequests?: ArchiveHandoverRequest[];
+  statusHistory?: ArchiveStatusHistory[];
 }
 
 interface ArchiveHandoverUser {
@@ -1613,6 +1795,8 @@ type ArchiveTableColumnKey =
   | 'status'
   | 'actions';
 
+type ArchiveSortableColumnKey = 'priority' | 'status';
+
 interface ArchiveTableColumnDefinition {
   key: ArchiveTableColumnKey;
   label: string;
@@ -1680,6 +1864,11 @@ const managedStatuses = ref<ArchiveStatusDefinition[]>([]);
 const canManageStatuses = ref(false);
 const statusManagerDialog = ref(false);
 const statusManagerSaving = ref(false);
+const statusReasonSaving = ref(false);
+const statusReasonImporting = ref(false);
+const statusReasonImportInput = ref<HTMLInputElement | null>(null);
+const statusReasonRows = ref<ArchiveStatusReason[]>([]);
+const statusReasonDraft = ref({ code: '', name: '' });
 const editingStatusId = ref('');
 const accounts = ref<Array<{ id: string; displayName: string | null }>>([]);
 const destinations = ref<any[]>([]);
@@ -1711,7 +1900,11 @@ const filters = ref({
   recallState: '',
 });
 const pagination = ref({ page: 1, limit: 20 });
-const statusForm = ref({ statusDefinitionId: '', resultContent: '', note: '' });
+const archiveSort = ref<{ sortBy: ArchiveSortableColumnKey; sortDir: 'asc' | 'desc' }>({
+  sortBy: 'priority',
+  sortDir: 'desc',
+});
+const statusForm = ref({ statusDefinitionId: '', reasonId: '', resultContent: '', note: '' });
 const statusEditForm = ref(emptyStatusEditForm());
 const configForm = ref({
   zaloAccountId: '',
@@ -2140,6 +2333,18 @@ function normalizeFilterText(value: string) {
     .trim();
 }
 
+function statusReasonFilter(value: string, query: string, item?: { raw?: ArchiveStatusReason }) {
+  const reason = item?.raw;
+  const needle = normalizeFilterText(query);
+  if (!needle) return true;
+  const haystack = normalizeFilterText(`${reason?.code || value || ''} ${reason?.name || ''}`);
+  return haystack.includes(needle);
+}
+
+function storyReasonLabel(story: ArchiveStory) {
+  return story.statusReasonNameSnapshot || story.statusReasonCodeSnapshot || '';
+}
+
 function userOptionScore(option: { title: string; value: string }, query: string) {
   const normalizedTitle = normalizeFilterText(option.title);
   const normalizedQuery = normalizeFilterText(query);
@@ -2239,6 +2444,11 @@ const selectedStatusOptions = computed(() => {
 const selectedTargetStatus = computed(() => (
   selectedStatusOptions.value.find((status) => status.id === statusForm.value.statusDefinitionId)
   || null
+));
+const selectedTargetReasonOptions = computed(() => (
+  (selectedTargetStatus.value?.reasons || [])
+    .filter((reason) => reason.isActive)
+    .sort((left, right) => left.displayOrder - right.displayOrder || left.name.localeCompare(right.name, 'vi-VN'))
 ));
 const isReopeningSelectedStory = computed(() => {
   if (!selectedStory.value || !selectedTargetStatus.value) return false;
@@ -2369,6 +2579,8 @@ async function fetchStories() {
         priority: filters.value.priority || undefined,
         requiresConfirmation: filters.value.requiresConfirmation || undefined,
         recallState: filters.value.recallState || undefined,
+        sortBy: archiveSort.value.sortBy,
+        sortDir: archiveSort.value.sortDir,
       },
     });
     stories.value = data.stories || [];
@@ -2386,6 +2598,39 @@ async function fetchStories() {
 }
 
 function applyFilters() {
+  pagination.value.page = 1;
+  void fetchStories();
+}
+
+function isSortableArchiveColumn(key: ArchiveTableColumnKey): key is ArchiveSortableColumnKey {
+  return key === 'priority' || key === 'status';
+}
+
+function archiveSortIcon(key: ArchiveSortableColumnKey) {
+  if (archiveSort.value.sortBy !== key) return 'mdi-sort';
+  return archiveSort.value.sortDir === 'desc' ? 'mdi-sort-descending' : 'mdi-sort-ascending';
+}
+
+function archiveSortTitle(key: ArchiveSortableColumnKey) {
+  if (key === 'priority') {
+    return archiveSort.value.sortBy === key && archiveSort.value.sortDir === 'asc'
+      ? 'Sắp xếp mức thấp trước, ngày nhận cũ nhất trước'
+      : 'Sắp xếp Gấp/Ưu tiên trước, ngày nhận cũ nhất trước';
+  }
+  return archiveSort.value.sortBy === key && archiveSort.value.sortDir === 'desc'
+    ? 'Sắp xếp trạng thái cuối danh mục trước, ngày nhận cũ nhất trước'
+    : 'Sắp xếp theo thứ tự cấu hình trạng thái, ngày nhận cũ nhất trước';
+}
+
+function toggleArchiveSort(key: ArchiveSortableColumnKey) {
+  if (archiveSort.value.sortBy !== key) {
+    archiveSort.value = {
+      sortBy: key,
+      sortDir: key === 'priority' ? 'desc' : 'asc',
+    };
+  } else {
+    archiveSort.value.sortDir = archiveSort.value.sortDir === 'desc' ? 'asc' : 'desc';
+  }
   pagination.value.page = 1;
   void fetchStories();
 }
@@ -2533,6 +2778,7 @@ async function fetchStatusDefinitions(includeInactive = false) {
     const loaded = (data.statuses || []) as ArchiveStatusDefinition[];
     statusDefinitions.value = loaded.filter((status) => status.isActive);
     if (includeInactive) managedStatuses.value = [...loaded];
+    if (includeInactive && editingStatusId.value) syncEditingStatusReasons();
     canManageStatuses.value = Boolean(data.canManage);
   } catch (error: any) {
     statusDefinitions.value = [];
@@ -2565,6 +2811,7 @@ function emptyStatusEditForm() {
     autoSyncReplies: true,
     requireNote: false,
     requireResult: false,
+    requireReason: false,
     isActive: true,
     transitionToIds: [] as string[],
   };
@@ -2576,6 +2823,8 @@ function startCreateStatus() {
     ...emptyStatusEditForm(),
     departmentId: canConfigure.value ? filters.value.departmentId || null : currentDepartment.value?.id || null,
   };
+  statusReasonRows.value = [];
+  statusReasonDraft.value = { code: '', name: '' };
 }
 
 function editManagedStatus(status: ArchiveStatusDefinition) {
@@ -2597,11 +2846,20 @@ function editManagedStatus(status: ArchiveStatusDefinition) {
     autoSyncReplies: status.autoSyncReplies,
     requireNote: status.requireNote,
     requireResult: status.requireResult,
+    requireReason: status.requireReason,
     isActive: status.isActive,
     transitionToIds: status.allowedTransitionIds
       || status.transitionsFrom?.map((transition) => transition.toStatusId)
       || [],
   };
+  statusReasonRows.value = (status.reasons || []).map((reason) => ({ ...reason }));
+  statusReasonDraft.value = { code: '', name: '' };
+}
+
+function syncEditingStatusReasons() {
+  const status = managedStatuses.value.find((item) => item.id === editingStatusId.value);
+  if (!status) return;
+  statusReasonRows.value = (status.reasons || []).map((reason) => ({ ...reason }));
 }
 
 function handleStatusBehaviorChange(value: unknown) {
@@ -2614,6 +2872,7 @@ function handleStatusBehaviorChange(value: unknown) {
   statusEditForm.value.autoSyncReplies = open;
   statusEditForm.value.requireNote = behavior === 'cancelled' || behavior === 'waiting';
   statusEditForm.value.requireResult = behavior === 'completed';
+  statusEditForm.value.requireReason = behavior === 'cancelled';
 }
 
 async function saveManagedStatus() {
@@ -2651,6 +2910,120 @@ async function saveManagedStatus() {
     toast.error(error?.response?.data?.error || 'Không thể lưu trạng thái');
   } finally {
     statusManagerSaving.value = false;
+  }
+}
+
+function normalizeReasonKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^[_-]+|[_-]+$/g, '');
+}
+
+async function addStatusReason() {
+  if (!editingStatusId.value) return;
+  if (!statusReasonDraft.value.code.trim() || !statusReasonDraft.value.name.trim()) {
+    toast.error('Mã và tên lý do là bắt buộc');
+    return;
+  }
+  statusReasonSaving.value = true;
+  try {
+    await api.post(`/archive/status-definitions/${editingStatusId.value}/reasons`, {
+      code: normalizeReasonKey(statusReasonDraft.value.code),
+      name: statusReasonDraft.value.name.trim(),
+      displayOrder: (statusReasonRows.value.length + 1) * 10,
+      isActive: true,
+    });
+    statusReasonDraft.value = { code: '', name: '' };
+    await fetchStatusDefinitions(true);
+    toast.success('Đã thêm lý do trạng thái');
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể thêm lý do');
+  } finally {
+    statusReasonSaving.value = false;
+  }
+}
+
+async function saveStatusReason(reason: ArchiveStatusReason) {
+  if (!reason.code.trim() || !reason.name.trim()) {
+    toast.error('Mã và tên lý do là bắt buộc');
+    return;
+  }
+  statusReasonSaving.value = true;
+  try {
+    await api.patch(`/archive/status-reasons/${reason.id}`, {
+      code: normalizeReasonKey(reason.code),
+      name: reason.name.trim(),
+      displayOrder: reason.displayOrder,
+      isActive: reason.isActive,
+    });
+    await fetchStatusDefinitions(true);
+    toast.success('Đã lưu lý do');
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể lưu lý do');
+  } finally {
+    statusReasonSaving.value = false;
+  }
+}
+
+async function removeStatusReason(reason: ArchiveStatusReason) {
+  if (!window.confirm(`Ngừng sử dụng lý do "${reason.name}"?`)) return;
+  statusReasonSaving.value = true;
+  try {
+    const { data } = await api.delete(`/archive/status-reasons/${reason.id}`);
+    await fetchStatusDefinitions(true);
+    toast.success(data.message || 'Đã cập nhật lý do');
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể cập nhật lý do');
+  } finally {
+    statusReasonSaving.value = false;
+  }
+}
+
+async function moveStatusReason(index: number, direction: -1 | 1) {
+  if (!editingStatusId.value) return;
+  const target = index + direction;
+  if (target < 0 || target >= statusReasonRows.value.length) return;
+  const reordered = [...statusReasonRows.value];
+  [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  statusReasonRows.value = reordered.map((reason, nextIndex) => ({
+    ...reason,
+    displayOrder: (nextIndex + 1) * 10,
+  }));
+  try {
+    await api.post(`/archive/status-definitions/${editingStatusId.value}/reasons/reorder`, {
+      reasonIds: statusReasonRows.value.map((reason) => reason.id),
+    });
+    await fetchStatusDefinitions(true);
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể sắp xếp lý do');
+    await fetchStatusDefinitions(true);
+  }
+}
+
+async function importStatusReasons(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file || !editingStatusId.value) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  statusReasonImporting.value = true;
+  try {
+    const { data } = await api.post(
+      `/archive/status-definitions/${editingStatusId.value}/reasons/import`,
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    await fetchStatusDefinitions(true);
+    const errorText = data.errors?.length ? `, lỗi ${data.errors.length} dòng` : '';
+    toast.success(`Đã nhập lý do: thêm ${data.created || 0}, cập nhật ${data.updated || 0}${errorText}`);
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể nhập Excel lý do');
+  } finally {
+    statusReasonImporting.value = false;
   }
 }
 
@@ -2730,6 +3103,7 @@ function openDetail(story: ArchiveStory) {
   titleDraft.value = story.title || '';
   statusForm.value = {
     statusDefinitionId: storyStatus(story).id,
+    reasonId: story.statusReasonId || '',
     resultContent: story.resultContent || '',
     note: '',
   };
@@ -3008,6 +3382,7 @@ function openStatusDialog(story: ArchiveStory | null) {
   selectedStory.value = story;
   statusForm.value = {
     statusDefinitionId: storyStatus(story).id,
+    reasonId: story.statusReasonId || '',
     resultContent: story.resultContent || '',
     note: '',
   };
@@ -3187,10 +3562,19 @@ async function saveStatus(statusDefinitionId?: string) {
     toast.error('Mở lại hồ sơ yêu cầu ghi rõ lý do');
     return;
   }
+  if (
+    selectedTargetStatus.value?.requireReason
+    && storyStatus(selectedStory.value).id !== selectedTargetStatus.value.id
+    && !statusForm.value.reasonId
+  ) {
+    toast.error('Vui lòng chọn lý do cho trạng thái này');
+    return;
+  }
   statusSaving.value = true;
   try {
     const payload = {
       statusDefinitionId: statusDefinitionId || statusForm.value.statusDefinitionId,
+      reasonId: statusForm.value.reasonId || null,
       resultContent: statusForm.value.resultContent,
       note: statusForm.value.note,
     };
@@ -3221,6 +3605,7 @@ async function quickChangeStatus(story: ArchiveStory, statusDefinitionId: string
   selectedStory.value = story;
   statusForm.value = {
     statusDefinitionId,
+    reasonId: '',
     resultContent: story.resultContent || '',
     note: '',
   };
@@ -3231,7 +3616,7 @@ async function quickChangeStatus(story: ArchiveStory, statusDefinitionId: string
     && ['completed', 'cancelled'].includes(source.behaviorGroup)
     && source.id !== target.id,
   );
-  if (target?.requireNote || target?.requireResult || isReopening) {
+  if (target?.requireNote || target?.requireResult || target?.requireReason || (target?.reasons || []).some((reason) => reason.isActive) || isReopening) {
     statusDialog.value = true;
     return;
   }
@@ -3513,8 +3898,10 @@ function storyStatus(story: ArchiveStory): ArchiveStatusDefinition {
     autoSyncReplies: behaviorGroup === 'active',
     requireNote: behaviorGroup === 'cancelled',
     requireResult: behaviorGroup === 'completed',
+    requireReason: false,
     isSystem: true,
     isActive: true,
+    reasons: [],
   };
 }
 
@@ -3550,6 +3937,8 @@ function behaviorLabel(value: ArchiveStatusDefinition['behaviorGroup']) {
 }
 
 function statusColor(status: ArchiveStatusDefinition) {
+  const color = String(status.colorToken || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color;
   return ({
     primary: 'primary',
     warning: 'warning',
@@ -3561,6 +3950,8 @@ function statusColor(status: ArchiveStatusDefinition) {
 }
 
 function statusPillStyle(status: ArchiveStatusDefinition) {
+  const customPalette = priorityPalette(status.colorToken);
+  if (/^#[0-9a-f]{6}$/i.test(String(status.colorToken || '').trim())) return customPalette;
   const palette = ({
     primary: { color: '#174ea6', background: '#e8f0fe', borderColor: '#c7d7f7' },
     warning: { color: '#9a5b00', background: '#fff4db', borderColor: '#f5d991' },
@@ -3623,6 +4014,11 @@ function colorInputValue(color?: string | null) {
 function updatePriorityCustomColor(option: ArchivePriorityOptionConfig, event: Event) {
   const value = (event.target as HTMLInputElement | null)?.value || '';
   option.color = /^#[0-9a-f]{6}$/i.test(value) ? value : '#64748b';
+}
+
+function updateStatusCustomColor(event: Event) {
+  const value = (event.target as HTMLInputElement | null)?.value || '';
+  statusEditForm.value.colorToken = /^#[0-9a-f]{6}$/i.test(value) ? value : '#174ea6';
 }
 
 function hexToRgb(hex: string) {
@@ -3721,6 +4117,18 @@ watch(customerSearch, (value) => {
     void searchCustomers(value || '');
   }, 300);
 });
+
+watch(
+  () => statusForm.value.statusDefinitionId,
+  () => {
+    if (
+      statusForm.value.reasonId
+      && !selectedTargetReasonOptions.value.some((reason) => reason.id === statusForm.value.reasonId)
+    ) {
+      statusForm.value.reasonId = '';
+    }
+  },
+);
 </script>
 
 <style scoped>
@@ -4392,6 +4800,15 @@ footer {
 }
 .detail-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 16px 24px; border-bottom: 1px solid #e5e7eb; }
 .detail-meta span { padding: 5px 11px; border: 1px solid #dde3ec; border-radius: 999px; background: #f0f3f7; color: #536176; font-size: 11px; }
+.detail-meta .status-reason-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: #bfdbfe;
+  color: #1e40af;
+  background: #eff6ff;
+  font-weight: 700;
+}
 .timeline { display: flex; min-height: 250px; flex-direction: column; gap: 14px; padding: 24px; }
 .timeline-message { width: fit-content; min-width: 260px; max-width: min(72%, 620px); padding: 14px 16px; border: 1px solid #d8dee8; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .03); }
 .timeline-message.is-customer { align-self: flex-start; }
@@ -6542,6 +6959,29 @@ footer {
   text-transform: uppercase;
 }
 
+.archive-sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.archive-sort-header:hover {
+  color: #0b57d0;
+}
+
+.archive-sort-header.active {
+  color: #0b57d0;
+}
+
 .archive-table td {
   height: 58px;
   padding: 8px 12px;
@@ -7777,11 +8217,108 @@ footer {
   gap: 10px;
 }
 
+.status-color-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 10px;
+  align-items: start;
+}
+
+.status-color-wheel {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-color-wheel input {
+  width: 54px;
+  height: 36px;
+  padding: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
 .status-rule-grid {
   padding: 10px 12px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #f8fafc;
+}
+
+.status-reason-manager {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.status-reason-head,
+.status-reason-create,
+.status-reason-row {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-reason-head {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.status-reason-head > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.status-reason-head strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.status-reason-head span,
+.status-reason-empty {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.status-reason-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-reason-create {
+  grid-template-columns: minmax(92px, .7fr) minmax(120px, 1fr) auto;
+}
+
+.status-reason-list {
+  display: grid;
+  gap: 8px;
+}
+
+.status-reason-row {
+  min-height: 48px;
+  grid-template-columns: minmax(92px, .75fr) minmax(140px, 1fr) 82px auto;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.status-reason-row.inactive {
+  opacity: .58;
+  background: #f8fafc;
+}
+
+.status-reason-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
 }
 
 .status-manager-form-actions {
@@ -8399,7 +8936,10 @@ footer {
   }
 
   .status-manager-form .config-row,
-  .status-rule-grid {
+  .status-rule-grid,
+  .status-color-controls,
+  .status-reason-create,
+  .status-reason-row {
     grid-template-columns: 1fr;
   }
 

@@ -80,6 +80,7 @@ model Organization {
   archiveTransferRequests   ArchiveAssignmentTransferRequest[]
   archiveAssignmentHistory  ArchiveAssignmentHistory[]
   archiveStatusDefinitions  ArchiveStatusDefinition[]
+  archiveStatusReasons      ArchiveStatusReason[]
   archiveStatusTransitions  ArchiveStatusTransition[]
   zaloAccountPrimaryDelegations ZaloAccountPrimaryDelegation[]
 
@@ -172,6 +173,7 @@ model User {
   archiveAssignmentsFrom    ArchiveAssignmentHistory[]    @relation("ArchiveAssignmentFrom")
   archiveAssignmentsTo      ArchiveAssignmentHistory[]    @relation("ArchiveAssignmentTo")
   archiveAssignmentsChanged ArchiveAssignmentHistory[]    @relation("ArchiveAssignmentChangedBy")
+  createdArchiveStatusReasons ArchiveStatusReason[]        @relation("ArchiveStatusReasonCreatedBy")
   createdArchiveStatuses    ArchiveStatusDefinition[]      @relation("ArchiveStatusCreatedBy")
   zaloPrimaryDelegationsBase      ZaloAccountPrimaryDelegation[] @relation("ZaloPrimaryDelegationBase")
   zaloPrimaryDelegationsDelegate  ZaloAccountPrimaryDelegation[] @relation("ZaloPrimaryDelegationDelegate")
@@ -687,6 +689,9 @@ model ArchiveStory {
   resultContent       String?   @map("result_content")
   businessStatus      String    @default("pending") @map("business_status")
   statusDefinitionId  String?   @map("status_definition_id")
+  statusReasonId      String?   @map("status_reason_id")
+  statusReasonCodeSnapshot String? @map("status_reason_code_snapshot")
+  statusReasonNameSnapshot String? @map("status_reason_name_snapshot")
   backupStatus        String    @default("pending") @map("backup_status")
   backupAttempts      Int       @default(0) @map("backup_attempts")
   backupError         String?   @map("backup_error")
@@ -706,6 +711,7 @@ model ArchiveStory {
   department    Department?            @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   completedBy   User?                  @relation("ArchiveStoryCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
   statusDefinition ArchiveStatusDefinition? @relation(fields: [statusDefinitionId], references: [id], onDelete: Restrict)
+  statusReason     ArchiveStatusReason?     @relation("ArchiveStoryStatusReason", fields: [statusReasonId], references: [id], onDelete: SetNull)
   messages      ArchiveMessage[]
   recallEvents  ArchiveRecallEvent[]
   statusHistory ArchiveStatusHistory[]
@@ -715,6 +721,7 @@ model ArchiveStory {
 
   @@index([orgId, businessStatus, createdAt])
   @@index([orgId, statusDefinitionId, createdAt])
+  @@index([orgId, statusReasonId, updatedAt])
   @@index([orgId, receivedAt])
   @@index([orgId, orderCode])
   @@index([orgId, priority, updatedAt])
@@ -811,6 +818,9 @@ model ArchiveStatusHistory {
   toStatus               String   @map("to_status")
   fromStatusDefinitionId String?  @map("from_status_definition_id")
   toStatusDefinitionId   String?  @map("to_status_definition_id")
+  reasonId               String?  @map("reason_id")
+  reasonCodeSnapshot     String?  @map("reason_code_snapshot")
+  reasonNameSnapshot     String?  @map("reason_name_snapshot")
   note                   String?
   resultContent          String?  @map("result_content")
   createdAt              DateTime @default(now()) @map("created_at")
@@ -819,11 +829,37 @@ model ArchiveStatusHistory {
   changedBy            User                     @relation(fields: [changedById], references: [id])
   fromStatusDefinition ArchiveStatusDefinition? @relation("ArchiveStatusHistoryFromDefinition", fields: [fromStatusDefinitionId], references: [id], onDelete: SetNull)
   toStatusDefinition   ArchiveStatusDefinition? @relation("ArchiveStatusHistoryToDefinition", fields: [toStatusDefinitionId], references: [id], onDelete: SetNull)
+  reason               ArchiveStatusReason?      @relation("ArchiveStatusHistoryReason", fields: [reasonId], references: [id], onDelete: SetNull)
 
   @@index([storyId, createdAt])
   @@index([fromStatusDefinitionId])
   @@index([toStatusDefinitionId])
+  @@index([reasonId])
   @@map("archive_status_history")
+}
+
+model ArchiveStatusReason {
+  id                 String   @id @default(uuid())
+  orgId              String   @map("org_id")
+  statusDefinitionId String   @map("status_definition_id")
+  code               String
+  name               String
+  description        String?
+  displayOrder       Int      @default(0) @map("display_order")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdByUserId    String?  @map("created_by_user_id")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  org              Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  statusDefinition ArchiveStatusDefinition @relation(fields: [statusDefinitionId], references: [id], onDelete: Cascade)
+  createdBy        User?                   @relation("ArchiveStatusReasonCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  stories          ArchiveStory[]          @relation("ArchiveStoryStatusReason")
+  statusHistory    ArchiveStatusHistory[]  @relation("ArchiveStatusHistoryReason")
+
+  @@unique([statusDefinitionId, code])
+  @@index([orgId, statusDefinitionId, isActive, displayOrder])
+  @@map("archive_status_reasons")
 }
 
 model ArchiveStatusDefinition {
@@ -845,6 +881,7 @@ model ArchiveStatusDefinition {
   autoSyncReplies    Boolean  @default(true) @map("auto_sync_replies")
   requireNote        Boolean  @default(false) @map("require_note")
   requireResult      Boolean  @default(false) @map("require_result")
+  requireReason      Boolean  @default(false) @map("require_reason")
   isSystem           Boolean  @default(false) @map("is_system")
   isActive           Boolean  @default(true) @map("is_active")
   createdByUserId    String?  @map("created_by_user_id")
@@ -855,6 +892,7 @@ model ArchiveStatusDefinition {
   department      Department?  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   createdBy       User?        @relation("ArchiveStatusCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   stories         ArchiveStory[]
+  reasons         ArchiveStatusReason[]
   transitionsFrom ArchiveStatusTransition[] @relation("ArchiveStatusTransitionFrom")
   transitionsTo   ArchiveStatusTransition[] @relation("ArchiveStatusTransitionTo")
   historyFrom     ArchiveStatusHistory[] @relation("ArchiveStatusHistoryFromDefinition")

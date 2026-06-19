@@ -160,6 +160,47 @@ function normalizeArchivePriorityOptions(input: unknown) {
     .sort((left, right) => left.sortOrder - right.sortOrder);
 }
 
+function normalizeArchivePriorityKey(value?: string | null) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+}
+
+async function archivePriorityRankMap(orgId: string) {
+  const setting = await prisma.appSetting.findUnique({
+    where: { orgId_settingKey: { orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY } },
+    select: { valuePlain: true },
+  });
+  let saved: unknown = null;
+  if (setting?.valuePlain) {
+    try {
+      saved = JSON.parse(setting.valuePlain);
+    } catch {
+      saved = null;
+    }
+  }
+  const options = normalizeArchivePriorityOptions(saved);
+  const ranks = new Map(options.map((option) => [option.key, option.sortOrder]));
+  const defaultRank = ranks.get('normal') ?? DEFAULT_ARCHIVE_PRIORITY_OPTIONS.find((option) => option.key === 'normal')?.sortOrder ?? 0;
+  return { ranks, defaultRank };
+}
+
+async function archiveStatusRankMap(orgId: string) {
+  const statuses = await prisma.archiveStatusDefinition.findMany({
+    where: { orgId },
+    select: { id: true, displayOrder: true, createdAt: true },
+    orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+  });
+  const ranks = new Map(statuses.map((status, index) => [
+    status.id,
+    Number.isFinite(Number(status.displayOrder)) ? Number(status.displayOrder) : (index + 1) * 10,
+  ]));
+  const legacyRanks = new Map([
+    ['pending', 10],
+    ['completed', 30],
+    ['cancelled', 40],
+  ]);
+  return { ranks, legacyRanks, defaultRank: 20 };
+}
+
 function isOpenArchiveStory(story: {
   businessStatus?: string | null;
   statusDefinition?: { behaviorGroup: string; countsAsWorkload?: boolean | null } | null;
@@ -1053,6 +1094,8 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       handover?: string;
       receivedFrom?: string;
       receivedTo?: string;
+      sortBy?: string;
+      sortDir?: string;
     };
     const page = Math.max(1, Number(query.page || 1));
     const limit = Math.min(100, Math.max(1, Number(query.limit || 30)));
@@ -1062,8 +1105,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (query.conversationId) where.conversationId = query.conversationId;
     if (query.zaloAccountId) where.zaloAccountId = query.zaloAccountId;
     if (query.backupStatus) where.backupStatus = query.backupStatus;
-    if (query.priority && ['low', 'normal', 'high', 'urgent'].includes(query.priority)) {
-      where.priority = query.priority;
+    const priorityFilter = normalizeArchivePriorityKey(query.priority);
+    if (priorityFilter) {
+      where.priority = priorityFilter;
     }
     if (query.requiresConfirmation === 'true') {
       where.requiresConfirmation = true;
@@ -1146,15 +1190,21 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    const [stories, total, groupedStatusCounts, handoverInboxCount] = await Promise.all([
+    const archiveSortBy = query.sortBy === 'status' ? 'status' : 'priority';
+    const archiveSortDir = query.sortDir === 'asc' ? 'asc' : 'desc';
+    const [sortRows, groupedStatusCounts, handoverInboxCount, priorityRanks, statusRanks] = await Promise.all([
       prisma.archiveStory.findMany({
         where,
-        include: archiveStoryInclude,
-        orderBy: { updatedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        select: {
+          id: true,
+          priority: true,
+          statusDefinitionId: true,
+          businessStatus: true,
+          receivedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       }),
-      prisma.archiveStory.count({ where }),
       prisma.archiveStory.groupBy({
         by: ['statusDefinitionId', 'businessStatus'],
         where: countWhere,
@@ -1166,16 +1216,47 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
           AND: [...(handoverCountWhere.AND || []), handoverInboxWhere],
         },
       }),
+      archivePriorityRankMap(actor.orgId),
+      archiveStatusRankMap(actor.orgId),
     ]);
+    const sortedIds = sortRows
+      .sort((left, right) => {
+        const leftRank = archiveSortBy === 'status'
+          ? left.statusDefinitionId
+            ? statusRanks.ranks.get(left.statusDefinitionId) ?? statusRanks.defaultRank
+            : statusRanks.legacyRanks.get(String(left.businessStatus || 'pending')) ?? statusRanks.defaultRank
+          : priorityRanks.ranks.get(normalizeArchivePriorityKey(left.priority)) ?? priorityRanks.defaultRank;
+        const rightRank = archiveSortBy === 'status'
+          ? right.statusDefinitionId
+            ? statusRanks.ranks.get(right.statusDefinitionId) ?? statusRanks.defaultRank
+            : statusRanks.legacyRanks.get(String(right.businessStatus || 'pending')) ?? statusRanks.defaultRank
+          : priorityRanks.ranks.get(normalizeArchivePriorityKey(right.priority)) ?? priorityRanks.defaultRank;
+        const rankDelta = archiveSortDir === 'asc' ? leftRank - rightRank : rightRank - leftRank;
+        if (rankDelta !== 0) return rankDelta;
+        const leftReceived = (left.receivedAt || left.createdAt).getTime();
+        const rightReceived = (right.receivedAt || right.createdAt).getTime();
+        return leftReceived - rightReceived || right.updatedAt.getTime() - left.updatedAt.getTime();
+      })
+      .map((row) => row.id);
+    const pageIds = sortedIds.slice((page - 1) * limit, page * limit);
+    const pageOrder = new Map(pageIds.map((id, index) => [id, index]));
+    const stories = pageIds.length
+      ? (await prisma.archiveStory.findMany({
+          where: { id: { in: pageIds } },
+          include: archiveStoryInclude,
+        })).sort((left, right) => (pageOrder.get(left.id) ?? 0) - (pageOrder.get(right.id) ?? 0))
+      : [];
     const statusCounts = Object.fromEntries(groupedStatusCounts.map((row) => [
       row.statusDefinitionId || `legacy:${row.businessStatus}`,
       row._count._all,
     ]));
     return {
       stories: await withArchivePermissionsList(actor, stories),
-      total,
+      total: sortedIds.length,
       page,
       limit,
+      sortBy: archiveSortBy,
+      sortDir: archiveSortDir,
       statusCounts,
       handoverInboxCount,
     };
@@ -1504,6 +1585,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     const body = request.body as {
       statusDefinitionId?: string;
       status?: string;
+      reasonId?: string | null;
       resultContent?: string | null;
       note?: string | null;
     };
@@ -1577,6 +1659,24 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (targetStatus.requireResult && !resultContent) {
       return reply.status(400).send({ error: `Trạng thái "${targetStatus.name}" yêu cầu kết quả xử lý` });
     }
+    const reasonProvided = Object.prototype.hasOwnProperty.call(body, 'reasonId');
+    const reasonId = body.reasonId?.trim() || '';
+    if (targetStatus.requireReason && sourceStatus.id !== targetStatus.id && !reasonId) {
+      return reply.status(400).send({ error: `Trạng thái "${targetStatus.name}" yêu cầu chọn lý do` });
+    }
+    const selectedReason = reasonId
+      ? await prisma.archiveStatusReason.findFirst({
+          where: {
+            id: reasonId,
+            orgId: actor.orgId,
+            statusDefinitionId: targetStatus.id,
+            isActive: true,
+          },
+        })
+      : null;
+    if (reasonId && !selectedReason) {
+      return reply.status(400).send({ error: 'Lý do không hợp lệ hoặc đã ngừng sử dụng' });
+    }
     if (
       ['completed', 'cancelled'].includes(sourceStatus.behaviorGroup)
       && sourceStatus.id !== targetStatus.id
@@ -1607,6 +1707,9 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
           toStatus: targetStatus.code,
           fromStatusDefinitionId: sourceStatus.id,
           toStatusDefinitionId: targetStatus.id,
+          reasonId: selectedReason?.id || null,
+          reasonCodeSnapshot: selectedReason?.code || null,
+          reasonNameSnapshot: selectedReason?.name || null,
           note: note || null,
           resultContent: resultContent || null,
         },
@@ -1623,6 +1726,21 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
               : resultContent || null,
           completedAt: completed ? new Date() : null,
           completedByUserId: completed ? actor.id : null,
+          statusReasonId: selectedReason
+            ? selectedReason.id
+            : sourceStatus.id === targetStatus.id && !reasonProvided
+              ? existing.statusReasonId
+              : null,
+          statusReasonCodeSnapshot: selectedReason
+            ? selectedReason.code
+            : sourceStatus.id === targetStatus.id && !reasonProvided
+              ? existing.statusReasonCodeSnapshot
+              : null,
+          statusReasonNameSnapshot: selectedReason
+            ? selectedReason.name
+            : sourceStatus.id === targetStatus.id && !reasonProvided
+              ? existing.statusReasonNameSnapshot
+              : null,
           backupStatus: existing.destinationId ? 'pending' : existing.backupStatus,
           nextBackupAt: existing.destinationId ? new Date() : existing.nextBackupAt,
         },
@@ -1634,6 +1752,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       status: story.statusDefinition,
       businessStatus: story.businessStatus,
       resultContent: story.resultContent,
+      statusReasonName: story.statusReasonNameSnapshot,
       changedByUserId: actor.id,
     });
     return { story: await withArchivePermissions(actor, story), message: 'Đã cập nhật trạng thái' };
