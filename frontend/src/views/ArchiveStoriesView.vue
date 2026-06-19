@@ -436,9 +436,14 @@
                   </template>
 
                   <template v-else-if="column.key === 'status'">
-                  <span class="status-pill" :style="statusPillStyle(storyStatus(story))">
-                    {{ storyStatus(story).name }}
-                  </span>
+                  <div class="status-cell">
+                    <span class="status-pill" :style="statusPillStyle(storyStatus(story))">
+                      {{ storyStatus(story).name }}
+                    </span>
+                    <small v-if="storyCompletionTime(story)" class="status-completed-time">
+                      {{ storyCompletionTime(story) }}
+                    </small>
+                  </div>
                   </template>
 
                   <template v-else-if="column.key === 'actions'">
@@ -1497,6 +1502,7 @@ interface ArchiveStory {
   statusDefinition?: ArchiveStatusDefinition | null;
   backupStatus: string;
   backupError?: string | null;
+  completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   department?: { id: string; name: string } | null;
@@ -3565,6 +3571,11 @@ function statusPillStyle(status: ArchiveStatusDefinition) {
   } as Record<string, { color: string; background: string; borderColor: string }>)[status.colorToken]
     || { color: '#174ea6', background: '#e8f0fe', borderColor: '#c7d7f7' };
   return palette;
+}
+
+function storyCompletionTime(story: ArchiveStory) {
+  if (storyStatus(story).behaviorGroup !== 'completed' || !story.completedAt) return '';
+  return formatCompactDate(story.completedAt);
 }
 
 function priorityPalette(color?: string | null) {
@@ -6732,6 +6743,28 @@ footer {
   border: 0;
   font-size: 10px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.status-cell {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.status-completed-time {
+  display: block;
+  max-width: 96px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
