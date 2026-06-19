@@ -17,6 +17,7 @@ const DEFAULT_STATUSES = [
     icon: 'mdi-progress-clock',
     displayOrder: 10,
     isDefault: true,
+    countsAsWorkload: true,
     allowMessageAppend: true,
     autoSyncReplies: true,
     requireNote: false,
@@ -31,6 +32,7 @@ const DEFAULT_STATUSES = [
     icon: 'mdi-alert-circle-outline',
     displayOrder: 20,
     isDefault: false,
+    countsAsWorkload: true,
     allowMessageAppend: true,
     autoSyncReplies: true,
     requireNote: true,
@@ -45,6 +47,7 @@ const DEFAULT_STATUSES = [
     icon: 'mdi-check-circle-outline',
     displayOrder: 30,
     isDefault: false,
+    countsAsWorkload: false,
     allowMessageAppend: false,
     autoSyncReplies: false,
     requireNote: false,
@@ -59,6 +62,7 @@ const DEFAULT_STATUSES = [
     icon: 'mdi-cancel',
     displayOrder: 40,
     isDefault: false,
+    countsAsWorkload: false,
     allowMessageAppend: false,
     autoSyncReplies: false,
     requireNote: true,
@@ -78,6 +82,7 @@ export interface ArchiveStatusInput {
   isDefault?: boolean;
   showOnKanban?: boolean;
   showCountOnOverview?: boolean;
+  countsAsWorkload?: boolean;
   allowMessageAppend?: boolean;
   autoSyncReplies?: boolean;
   requireNote?: boolean;
@@ -106,6 +111,7 @@ export async function ensureArchiveDefaultStatuses(orgId: string) {
         ...definition,
         showOnKanban: true,
         showCountOnOverview: ['active', 'waiting'].includes(definition.behaviorGroup),
+        countsAsWorkload: definition.countsAsWorkload,
         isSystem: true,
         isActive: true,
       },
@@ -259,6 +265,7 @@ export async function createArchiveStatusDefinition(input: {
         isDefault: data.isDefault,
         showOnKanban: data.showOnKanban,
         showCountOnOverview: data.showCountOnOverview,
+        countsAsWorkload: data.countsAsWorkload,
         allowMessageAppend: data.allowMessageAppend,
         autoSyncReplies: data.autoSyncReplies,
         requireNote: data.requireNote,
@@ -316,6 +323,7 @@ export async function updateArchiveStatusDefinition(input: {
     isDefault: input.data.isDefault ?? existing.isDefault,
     showOnKanban: input.data.showOnKanban ?? existing.showOnKanban,
     showCountOnOverview: input.data.showCountOnOverview ?? existing.showCountOnOverview,
+    countsAsWorkload: input.data.countsAsWorkload ?? existing.countsAsWorkload,
     allowMessageAppend: input.data.allowMessageAppend ?? existing.allowMessageAppend,
     autoSyncReplies: input.data.autoSyncReplies ?? existing.autoSyncReplies,
     requireNote: input.data.requireNote ?? existing.requireNote,
@@ -443,6 +451,10 @@ export function isOpenArchiveBehavior(behaviorGroup?: string | null) {
   return behaviorGroup === 'active' || behaviorGroup === 'waiting';
 }
 
+export function defaultCountsAsWorkload(behaviorGroup?: string | null) {
+  return isOpenArchiveBehavior(behaviorGroup);
+}
+
 export function transitionPermission(
   sourceBehavior: string,
   targetBehavior: string,
@@ -478,6 +490,7 @@ function normalizeStatusInput(data: ArchiveStatusInput, requireIdentity: boolean
     isDefault: Boolean(data.isDefault),
     showOnKanban: data.showOnKanban ?? true,
     showCountOnOverview: data.showCountOnOverview ?? ['active', 'waiting'].includes(behaviorGroup),
+    countsAsWorkload: data.countsAsWorkload ?? defaultCountsAsWorkload(behaviorGroup),
     allowMessageAppend: data.allowMessageAppend ?? open,
     autoSyncReplies: data.autoSyncReplies ?? open,
     requireNote: data.requireNote ?? (

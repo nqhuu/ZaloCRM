@@ -97,10 +97,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS
 ON "archive_status_definitions" ("org_id", "department_id")
 WHERE "department_id" IS NOT NULL AND "is_default" = true AND "is_active" = true;
 
+ALTER TABLE "archive_status_definitions"
+  ADD COLUMN IF NOT EXISTS "counts_as_workload" BOOLEAN NOT NULL DEFAULT false;
+
+UPDATE "archive_status_definitions"
+SET "counts_as_workload" = true
+WHERE "behavior_group" IN ('active', 'waiting')
+  AND "counts_as_workload" = false;
+
 INSERT INTO "archive_status_definitions" (
   "id", "org_id", "code", "name", "description", "behavior_group",
   "color_token", "icon", "display_order", "is_default", "show_on_kanban",
-  "allow_message_append", "auto_sync_replies", "require_note", "require_result",
+  "counts_as_workload", "allow_message_append", "auto_sync_replies", "require_note", "require_result",
   "is_system", "is_active", "updated_at"
 )
 SELECT
@@ -115,6 +123,7 @@ SELECT
   seed."display_order",
   seed."is_default",
   true,
+  seed."counts_as_workload",
   seed."allow_message_append",
   seed."auto_sync_replies",
   seed."require_note",
@@ -125,13 +134,13 @@ SELECT
 FROM "organizations" org
 CROSS JOIN (
   VALUES
-    ('processing', 'Đang xử lý', 'Hồ sơ đang được thực hiện', 'active', 'primary', 'mdi-progress-clock', 10, true, true, true, false, false),
-    ('needs_info', 'Thiếu thông tin', 'Đang chờ dữ liệu hoặc phản hồi', 'waiting', 'warning', 'mdi-alert-circle-outline', 20, false, true, true, true, false),
-    ('completed', 'Hoàn thành', 'Đã có kết quả xử lý cuối cùng', 'completed', 'success', 'mdi-check-circle-outline', 30, false, false, false, false, true),
-    ('cancelled', 'Huỷ', 'Hồ sơ không tiếp tục xử lý', 'cancelled', 'error', 'mdi-cancel', 40, false, false, false, true, false)
+    ('processing', 'Đang xử lý', 'Hồ sơ đang được thực hiện', 'active', 'primary', 'mdi-progress-clock', 10, true, true, true, true, false, false),
+    ('needs_info', 'Thiếu thông tin', 'Đang chờ dữ liệu hoặc phản hồi', 'waiting', 'warning', 'mdi-alert-circle-outline', 20, false, true, true, true, true, false),
+    ('completed', 'Hoàn thành', 'Đã có kết quả xử lý cuối cùng', 'completed', 'success', 'mdi-check-circle-outline', 30, false, false, false, false, false, true),
+    ('cancelled', 'Huỷ', 'Hồ sơ không tiếp tục xử lý', 'cancelled', 'error', 'mdi-cancel', 40, false, false, false, false, true, false)
 ) AS seed(
   "code", "name", "description", "behavior_group", "color_token", "icon",
-  "display_order", "is_default", "allow_message_append", "auto_sync_replies",
+  "display_order", "is_default", "counts_as_workload", "allow_message_append", "auto_sync_replies",
   "require_note", "require_result"
 )
 WHERE NOT EXISTS (

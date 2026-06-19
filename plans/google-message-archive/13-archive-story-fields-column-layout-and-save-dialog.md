@@ -328,34 +328,31 @@ Quyen:
 - Endpoint metadata ho so khong con nhan/update `requiresConfirmation`.
 - Da co API cau hinh priority options theo org: `GET/PUT /api/v1/archive/priority-options`.
 - Dialog luu ho so va bang ho so da doc priority options tu backend, fallback ve default neu chua cau hinh.
-- Da build Docker thanh cong va app dang chay lai tren `http://localhost:3080`.
+- Da co UI quan tri priority options cho Owner/Admin ngay trong man hinh `Ho so trao doi`.
+- UI quan tri priority options da cho them/sua label, sua ma cho muc moi, chon mau, sap xep thu tu, bat/tat active va chon 1 muc default.
+- Da khoa xoa/sua ma cac muc priority mac dinh `low`, `normal`, `high`, `urgent` de tranh lech du lieu ho so cu.
+- Da co audit log qua `ActivityLog` khi admin luu cau hinh priority options, gom before/after.
+- Da build frontend thanh cong.
+- Da rebuild Docker thanh cong, backend/frontend build pass trong container va app tra HTTP 200 tren `http://localhost:3080`.
 
 ### 8.2. Da lam nhung can sua lai theo thong nhat moi
 
-- Tam thoi khong con muc nao trong pham vi vua chot can sua lai. Neu sau khi test UI thuc te phat hien dropdown Vuetify van bi dong bat thuong, can xu ly rieng theo co che menu/teleport cua component.
+- Tam thoi khong con muc nao trong pham vi vua chot can sua lai.
 
 ### 8.3. Chua hoan thanh
 
-- Chua co man hinh quan tri day du de admin them/sua/xoa/sap xep priority options; hien moi co API backend va frontend doc options.
-- Chua co audit log rieng cho thay doi priority options.
-- Chua test click UI thuc te bang browser do browser tool trong moi truong hien tai khong kha dung.
-- Chua test click UI thuc te dropdown `Uu tien` bang browser; moi verify qua Docker build va HTTP 200.
+- Chua test click UI thuc te voi user da dang nhap trong browser noi bo; browser hien dang dung o man login nen chua click duoc cac luong can quyen.
 
 ## 9. Thu tu xu ly tiep theo
 
-1. Test click UI thuc te tren browser:
+1. Test click UI thuc te tren browser voi tai khoan co quyen:
    - Dropdown `Binh thuong` trong dialog mo va chon duoc.
    - Dialog khong co field chon `Can xac nhan`.
    - Bang ho so khong sua duoc `Can xac nhan`.
    - Setup user/group `Can xac nhan` chi chon `Co` hoac `Khong`.
    - Cot `Ghi chu khac` hien thi va sua duoc theo quyen.
-2. Bo sung man hinh quan tri priority options cho Owner/Admin:
-   - Them/sua label.
-   - Chon mau.
-   - Sap xep thu tu.
-   - Bat/tat active.
-   - Chon 1 muc default.
-3. Bo sung audit log cho thay doi priority options neu can theo quy chuan audit chung cua he thong.
+   - Dialog cau hinh priority options them/sua/sap xep/luu duoc.
+2. Neu can hien thi audit priority options o UI rieng, bo sung bo loc/label trong man activity log chung.
 
 ## 10. Ket luan chot
 

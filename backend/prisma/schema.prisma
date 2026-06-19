@@ -840,6 +840,7 @@ model ArchiveStatusDefinition {
   isDefault          Boolean  @default(false) @map("is_default")
   showOnKanban       Boolean  @default(true) @map("show_on_kanban")
   showCountOnOverview Boolean @default(false) @map("show_count_on_overview")
+  countsAsWorkload   Boolean  @default(false) @map("counts_as_workload")
   allowMessageAppend Boolean  @default(true) @map("allow_message_append")
   autoSyncReplies    Boolean  @default(true) @map("auto_sync_replies")
   requireNote        Boolean  @default(false) @map("require_note")

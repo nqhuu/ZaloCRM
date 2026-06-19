@@ -40,6 +40,7 @@ import {
   transitionPermission,
 } from './archive-status-service.js';
 import { emitNotificationCount } from '../notifications/notification-events.js';
+import { logActivity } from '../activity/activity-logger.js';
 
 function searchTerms(input?: string): string[] {
   const raw = String(input || '').trim();
@@ -74,7 +75,9 @@ function isAppendBlockedByStatus(story: {
 }
 
 const ARCHIVE_TABLE_COLUMN_PREF_KEY = 'archive.tableColumnPrefs';
+const ARCHIVE_TABLE_COLUMN_SYSTEM_PREF_KEY = 'archive.tableColumnPrefs.system';
 const ARCHIVE_PRIORITY_OPTIONS_KEY = 'archive.priorityOptions';
+const ARCHIVE_WORKLOAD_OVERDUE_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_ARCHIVE_PRIORITY_OPTIONS = [
   { key: 'low', label: 'Thap', color: 'info', sortOrder: 10, isDefault: false, isActive: true },
   { key: 'normal', label: 'Binh thuong', color: 'neutral', sortOrder: 20, isDefault: true, isActive: true },
@@ -113,6 +116,19 @@ function normalizeArchiveTableColumnPrefs(input: unknown) {
     .map((row, index) => ({ ...row, order: index }));
 }
 
+function parseArchiveTableColumnPrefs(input?: string | null) {
+  if (!input) return [];
+  try {
+    return normalizeArchiveTableColumnPrefs(JSON.parse(input));
+  } catch {
+    return [];
+  }
+}
+
+function canConfigureArchiveTableColumns(actor: ArchiveActor) {
+  return ['owner', 'admin'].includes(actor.role);
+}
+
 function normalizeArchivePriorityOptions(input: unknown) {
   const rows = Array.isArray(input) ? input : [];
   const normalized = rows
@@ -142,6 +158,53 @@ function normalizeArchivePriorityOptions(input: unknown) {
   return deduped
     .map((row, index) => ({ ...row, isDefault: defaultIndex >= 0 ? index === defaultIndex : row.key === 'normal' }))
     .sort((left, right) => left.sortOrder - right.sortOrder);
+}
+
+function isOpenArchiveStory(story: {
+  businessStatus?: string | null;
+  statusDefinition?: { behaviorGroup: string; countsAsWorkload?: boolean | null } | null;
+}) {
+  if (story.statusDefinition) {
+    return story.statusDefinition.countsAsWorkload
+      ?? ['active', 'waiting'].includes(story.statusDefinition.behaviorGroup);
+  }
+  return !['completed', 'cancelled'].includes(String(story.businessStatus || 'pending'));
+}
+
+function isMissingInfoArchiveStory(story: {
+  businessStatus?: string | null;
+  statusDefinition?: { code: string; name: string } | null;
+}) {
+  const statusText = `${story.statusDefinition?.code || ''} ${story.statusDefinition?.name || ''} ${story.businessStatus || ''}`.toLowerCase();
+  return statusText.includes('missing')
+    || statusText.includes('thieu')
+    || statusText.includes('thiếu')
+    || statusText.includes('bo_sung')
+    || statusText.includes('bổ sung');
+}
+
+function archiveWorkloadWarningLevel(row: {
+  openCount: number;
+  urgentCount: number;
+  overdueCount: number;
+}) {
+  if (row.openCount > 10 || row.overdueCount >= 2 || row.urgentCount >= 3) return 'danger';
+  if (row.openCount > 5 || row.overdueCount >= 1) return 'warning';
+  return 'normal';
+}
+
+function archiveWorkloadScore(row: {
+  openCount: number;
+  urgentCount: number;
+  overdueCount: number;
+  missingInfoCount: number;
+  needsConfirmationCount: number;
+}) {
+  return row.openCount
+    + row.urgentCount * 3
+    + row.overdueCount * 2
+    + row.missingInfoCount * 1.5
+    + row.needsConfirmationCount;
 }
 
 async function withArchivePermissions<T extends {
@@ -177,13 +240,27 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/v1/archive/table-column-prefs', async (request, reply) => {
     const actor = request.user! as ArchiveActor;
     if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
-    const pref = await prisma.userPreference.findUnique({
-      where: { userId_key: { userId: actor.id, key: ARCHIVE_TABLE_COLUMN_PREF_KEY } },
-      select: { value: true, updatedAt: true },
-    });
+    const [pref, systemPref] = await Promise.all([
+      prisma.userPreference.findUnique({
+        where: { userId_key: { userId: actor.id, key: ARCHIVE_TABLE_COLUMN_PREF_KEY } },
+        select: { value: true, updatedAt: true },
+      }),
+      prisma.appSetting.findUnique({
+        where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_TABLE_COLUMN_SYSTEM_PREF_KEY } },
+        select: { valuePlain: true, updatedAt: true },
+      }),
+    ]);
+    const userColumns = normalizeArchiveTableColumnPrefs(pref?.value);
+    const systemColumns = parseArchiveTableColumnPrefs(systemPref?.valuePlain);
+    const columns = userColumns.length ? userColumns : systemColumns;
     return {
-      columns: normalizeArchiveTableColumnPrefs(pref?.value),
+      columns,
+      source: userColumns.length ? 'user' : systemColumns.length ? 'system' : 'default',
+      userColumns,
+      systemColumns,
       updatedAt: pref?.updatedAt || null,
+      systemUpdatedAt: systemPref?.updatedAt || null,
+      canApplySystem: canConfigureArchiveTableColumns(actor),
     };
   });
 
@@ -199,6 +276,49 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       update: { value: columns as any },
     });
     return { columns, updatedAt: pref.updatedAt };
+  });
+
+  app.delete('/api/v1/archive/table-column-prefs', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    await prisma.userPreference.deleteMany({
+      where: { userId: actor.id, key: ARCHIVE_TABLE_COLUMN_PREF_KEY },
+    });
+    const systemPref = await prisma.appSetting.findUnique({
+      where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_TABLE_COLUMN_SYSTEM_PREF_KEY } },
+      select: { valuePlain: true, updatedAt: true },
+    });
+    const systemColumns = parseArchiveTableColumnPrefs(systemPref?.valuePlain);
+    return {
+      columns: systemColumns,
+      source: systemColumns.length ? 'system' : 'default',
+      systemColumns,
+      systemUpdatedAt: systemPref?.updatedAt || null,
+      canApplySystem: canConfigureArchiveTableColumns(actor),
+    };
+  });
+
+  app.put('/api/v1/archive/table-column-prefs/system', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    if (!canConfigureArchiveTableColumns(actor)) return forbidden(reply, 'archive.configure_columns');
+    const body = request.body as { columns?: unknown };
+    const columns = normalizeArchiveTableColumnPrefs(body.columns);
+    if (columns.length === 0) return reply.status(400).send({ error: 'columns is required' });
+    const setting = await prisma.appSetting.upsert({
+      where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_TABLE_COLUMN_SYSTEM_PREF_KEY } },
+      create: {
+        orgId: actor.orgId,
+        settingKey: ARCHIVE_TABLE_COLUMN_SYSTEM_PREF_KEY,
+        valuePlain: JSON.stringify(columns),
+      },
+      update: { valuePlain: JSON.stringify(columns) },
+    });
+    return {
+      columns,
+      systemColumns: columns,
+      systemUpdatedAt: setting.updatedAt,
+    };
   });
 
   app.get('/api/v1/archive/priority-options', async (request, reply) => {
@@ -222,6 +342,176 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  app.get('/api/v1/archive/workload-summary', async (request, reply) => {
+    const actor = request.user! as ArchiveActor;
+    if (!(await actorHasArchiveGrant(actor, 'access'))) return forbidden(reply, 'archive.access');
+    const query = request.query as {
+      departmentId?: string;
+      includeUnassigned?: string;
+      followCurrentFilters?: string;
+      recordType?: string;
+      priority?: string;
+      requiresConfirmation?: string;
+    };
+    const scopeWhere: any = await archiveScopeWhere(actor);
+    const where: any = {
+      ...scopeWhere,
+      AND: [
+        ...(scopeWhere.AND || []),
+        {
+          OR: [
+            { statusDefinition: { is: { countsAsWorkload: true } } },
+            { statusDefinitionId: null, businessStatus: { notIn: ['completed', 'cancelled'] } },
+          ],
+        },
+      ],
+    };
+    if (query.departmentId) where.departmentId = query.departmentId;
+    if (query.followCurrentFilters === 'true') {
+      if (query.recordType) where.recordType = query.recordType;
+      if (query.priority) where.priority = query.priority;
+      if (query.requiresConfirmation === 'true') {
+        where.requiresConfirmation = true;
+      } else if (query.requiresConfirmation === 'false') {
+        where.requiresConfirmation = false;
+      } else if (query.requiresConfirmation === 'unknown') {
+        where.requiresConfirmation = null;
+      }
+    }
+
+    const [stories, department] = await Promise.all([
+      prisma.archiveStory.findMany({
+        where,
+        select: {
+          id: true,
+          assignedUserId: true,
+          departmentId: true,
+          priority: true,
+          requiresConfirmation: true,
+          businessStatus: true,
+          receivedAt: true,
+          createdAt: true,
+          statusDefinition: {
+            select: { code: true, name: true, behaviorGroup: true, countsAsWorkload: true },
+          },
+          assignedUser: {
+            select: {
+              id: true,
+              fullName: true,
+              departmentMember: {
+                select: {
+                  departmentId: true,
+                  department: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+          department: { select: { id: true, name: true } },
+        },
+      }),
+      query.departmentId
+        ? prisma.department.findFirst({
+            where: { id: query.departmentId, orgId: actor.orgId, archivedAt: null },
+            select: { id: true, name: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const now = Date.now();
+    const includeUnassigned = query.includeUnassigned !== 'false';
+    const rows = new Map<string, {
+      userId: string | null;
+      userName: string;
+      avatarUrl: string | null;
+      departmentId: string | null;
+      departmentName: string | null;
+      openCount: number;
+      urgentCount: number;
+      overdueCount: number;
+      missingInfoCount: number;
+      needsConfirmationCount: number;
+      oldestOpenAt: Date | null;
+      oldestOpenAgeMinutes: number | null;
+      workloadScore: number;
+      warningLevel: 'normal' | 'warning' | 'danger';
+    }>();
+
+    for (const story of stories) {
+      if (!isOpenArchiveStory(story)) continue;
+      if (!story.assignedUserId && !includeUnassigned) continue;
+      const key = story.assignedUserId || 'unassigned';
+      const baseDate = story.receivedAt || story.createdAt;
+      const row = rows.get(key) || {
+        userId: story.assignedUserId || null,
+        userName: story.assignedUser?.fullName || 'Chưa phân công',
+        avatarUrl: null,
+        departmentId: story.assignedUser?.departmentMember?.departmentId || story.departmentId || null,
+        departmentName: story.assignedUser?.departmentMember?.department?.name || story.department?.name || null,
+        openCount: 0,
+        urgentCount: 0,
+        overdueCount: 0,
+        missingInfoCount: 0,
+        needsConfirmationCount: 0,
+        oldestOpenAt: null,
+        oldestOpenAgeMinutes: null,
+        workloadScore: 0,
+        warningLevel: 'normal',
+      };
+      row.openCount += 1;
+      if (['high', 'urgent'].includes(story.priority)) row.urgentCount += 1;
+      if (baseDate && now - baseDate.getTime() > ARCHIVE_WORKLOAD_OVERDUE_MS) row.overdueCount += 1;
+      if (isMissingInfoArchiveStory(story)) row.missingInfoCount += 1;
+      if (story.requiresConfirmation === true) row.needsConfirmationCount += 1;
+      if (baseDate && (!row.oldestOpenAt || baseDate < row.oldestOpenAt)) {
+        row.oldestOpenAt = baseDate;
+      }
+      rows.set(key, row);
+    }
+
+    const users = [...rows.values()].map((row) => {
+      const workloadScore = archiveWorkloadScore(row);
+      const warningLevel = archiveWorkloadWarningLevel(row);
+      return {
+        ...row,
+        oldestOpenAt: row.oldestOpenAt ? row.oldestOpenAt.toISOString() : null,
+        oldestOpenAgeMinutes: row.oldestOpenAt ? Math.max(0, Math.floor((now - row.oldestOpenAt.getTime()) / 60_000)) : null,
+        workloadScore,
+        warningLevel,
+      };
+    }).sort((left, right) => (
+      right.workloadScore - left.workloadScore
+      || right.openCount - left.openCount
+      || left.userName.localeCompare(right.userName, 'vi')
+    ));
+
+    const totals = users.reduce((acc, row) => {
+      acc.openCount += row.openCount;
+      acc.urgentCount += row.urgentCount;
+      acc.overdueCount += row.overdueCount;
+      acc.missingInfoCount += row.missingInfoCount;
+      acc.needsConfirmationCount += row.needsConfirmationCount;
+      if (!row.userId) acc.unassignedCount += row.openCount;
+      return acc;
+    }, {
+      openCount: 0,
+      urgentCount: 0,
+      overdueCount: 0,
+      missingInfoCount: 0,
+      needsConfirmationCount: 0,
+      unassignedCount: 0,
+    });
+
+    return {
+      scope: {
+        departmentId: department?.id || query.departmentId || null,
+        departmentName: department?.name || null,
+        generatedAt: new Date(now).toISOString(),
+      },
+      totals,
+      users,
+    };
+  });
+
   app.put('/api/v1/archive/priority-options', async (request, reply) => {
     const actor = request.user! as ArchiveActor;
     if (!['owner', 'admin'].includes(actor.role)) return forbidden(reply, 'admin');
@@ -231,10 +521,34 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     if (activeDefaults.length !== 1) {
       return reply.status(400).send({ error: 'Exactly one active default priority is required' });
     }
+    const previousSetting = await prisma.appSetting.findUnique({
+      where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY } },
+      select: { valuePlain: true },
+    });
+    let previousOptions: unknown = null;
+    if (previousSetting?.valuePlain) {
+      try {
+        previousOptions = JSON.parse(previousSetting.valuePlain);
+      } catch {
+        previousOptions = null;
+      }
+    }
     const setting = await prisma.appSetting.upsert({
       where: { orgId_settingKey: { orgId: actor.orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY } },
       create: { orgId: actor.orgId, settingKey: ARCHIVE_PRIORITY_OPTIONS_KEY, valuePlain: JSON.stringify(options) },
       update: { valuePlain: JSON.stringify(options) },
+    });
+    logActivity({
+      orgId: actor.orgId,
+      userId: actor.id,
+      category: 'system',
+      action: 'archive_priority_options_update',
+      entityType: 'archive_priority_options',
+      entityId: actor.orgId,
+      details: {
+        before: normalizeArchivePriorityOptions(previousOptions),
+        after: options,
+      },
     });
     return { options, updatedAt: setting.updatedAt };
   });
@@ -799,8 +1113,11 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       ...(countWhere.AND ? { AND: [...countWhere.AND] } : {}),
     };
     if (query.assignedUserId && query.handover !== 'inbox') {
-      where.assignedUserId = query.assignedUserId;
-      countWhere.assignedUserId = query.assignedUserId;
+      const assignedFilter = ['__unassigned__', 'unassigned'].includes(query.assignedUserId)
+        ? null
+        : query.assignedUserId;
+      where.assignedUserId = assignedFilter;
+      countWhere.assignedUserId = assignedFilter;
     }
     const handoverInboxWhere = {
       transferRequests: { some: { toUserId: actor.id, status: 'pending' } },

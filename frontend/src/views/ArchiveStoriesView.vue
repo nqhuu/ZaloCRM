@@ -30,6 +30,14 @@
         />
         <v-btn
           v-if="canConfigure"
+          class="config-trigger config-trigger--labeled"
+          variant="text"
+          prepend-icon="mdi-flag-variant-outline"
+          title="Cấu hình mức độ ưu tiên"
+          @click="openPriorityManager"
+        ></v-btn>
+        <v-btn
+          v-if="canConfigure"
           class="config-trigger"
           variant="text"
           icon="mdi-cog-outline"
@@ -198,17 +206,16 @@
             @update:model-value="applyFilters"
           />
         </label>
-        <label class="archive-filter-field">
-          <span>Cần xác nhận</span>
-          <v-select
-            v-model="filters.requiresConfirmation"
-            :items="confirmationOptions"
-            density="compact"
-            variant="outlined"
-            hide-details
-            @update:model-value="applyFilters"
-          />
-        </label>
+        </div>
+        <ArchiveWorkloadQuickReport
+          :department-id="filters.departmentId"
+          :selected-user-id="filters.assignedUserId"
+          :refresh-key="workloadRefreshKey"
+          :record-type="filters.recordType"
+          :priority="filters.priority"
+          :requires-confirmation="filters.requiresConfirmation"
+          @select-user="selectWorkloadUser"
+        />
         <div class="archive-filter-footer">
           <div class="archive-filter-recall">
             <div>
@@ -230,7 +237,6 @@
           <v-btn class="archive-filter-refresh" variant="tonal" prepend-icon="mdi-refresh" :loading="loading" @click="fetchStories">
             Làm mới
           </v-btn>
-        </div>
         </div>
       </aside>
 
@@ -328,7 +334,7 @@
                     :title="canEditStoryMetadata(story) ? 'Sua ghi chu khac' : mutationDeniedMessage(story)"
                     @click.stop="startInlineEdit(story, 'extraNote', story.extraNote || '')"
                   >
-                    <span>{{ story.extraNote || 'Chua co ghi chu' }}</span>
+                    <span>{{ story.extraNote || '' }}</span>
                   </button>
                   </template>
 
@@ -344,18 +350,31 @@
                   </template>
 
                   <template v-else-if="column.key === 'priority'">
-                  <v-select
+                  <span
                     v-if="isInlineEditing(story, 'priority')"
-                    v-model="inlineEdit.value"
-                    :items="priorityEditOptions"
-                    class="archive-inline-select"
-                    density="compact"
-                    variant="outlined"
-                    hide-details
-                    autofocus
+                    class="archive-inline-priority-select priority-pill"
+                    :class="`priority-${inlineEdit.value || story.priority || 'normal'}`"
+                    :style="priorityPillStyle(inlineEdit.value || story.priority)"
                     @click.stop
-                    @update:model-value="saveInlineEdit(story)"
-                  />
+                  >
+                    <select
+                      v-model="inlineEdit.value"
+                      autofocus
+                      aria-label="Chọn mức độ ưu tiên"
+                      @click.stop
+                      @change.stop="saveInlineEdit(story)"
+                      @keydown.esc.stop="cancelInlineEdit"
+                    >
+                      <option
+                        v-for="option in priorityEditOptions"
+                        :key="option.value"
+                        :value="option.value"
+                      >
+                        {{ option.title }}
+                      </option>
+                    </select>
+                    <v-icon size="16">mdi-menu-down</v-icon>
+                  </span>
                   <button
                     v-else
                     class="archive-inline-value"
@@ -364,7 +383,11 @@
                     :title="canEditStoryMetadata(story) ? 'Sửa mức độ ưu tiên' : mutationDeniedMessage(story)"
                     @click.stop="startInlineEdit(story, 'priority', story.priority || 'normal')"
                   >
-                    <span class="priority-pill" :class="`priority-${story.priority || 'normal'}`">
+                    <span
+                      class="priority-pill"
+                      :class="`priority-${story.priority || 'normal'}`"
+                      :style="priorityPillStyle(story.priority)"
+                    >
                       {{ priorityLabel(story.priority) }}
                     </span>
                   </button>
@@ -632,7 +655,7 @@
           </div>
         </section>
         <footer v-if="total > 0" class="archive-pagination">
-          <div>
+          <div class="archive-pagination-info">
             <span>Tổng cộng: <strong>{{ total }}</strong> hồ sơ</span>
             <label>
               Hiển thị:
@@ -642,6 +665,12 @@
                 <option :value="100">100</option>
               </select>
             </label>
+            <div class="archive-workload-legend" aria-label="Chú giải ký hiệu tồn đọng">
+              <span><b>G</b> Gấp</span>
+              <span><b>QH</b> Quá hạn</span>
+              <span><b>Thiếu</b> Thiếu thông tin</span>
+              <span><b>Cũ</b> Hồ sơ cũ nhất</span>
+            </div>
           </div>
           <div class="pagination-buttons">
             <button :disabled="pagination.page <= 1" @click="changePage(pagination.page - 1)">
@@ -1056,6 +1085,7 @@
                   item-value="value"
                   label="Nhóm hành vi *"
                   variant="outlined"
+                  @update:model-value="handleStatusBehaviorChange"
                 />
                 <v-select
                   v-model="statusEditForm.colorToken"
@@ -1091,6 +1121,12 @@
                 <v-switch v-model="statusEditForm.isDefault" label="Mặc định khi tạo" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.showOnKanban" label="Hiển thị trên Kanban" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.showCountOnOverview" label="Hiển thị số tồn trên tab" color="primary" hide-details />
+                <v-switch
+                  v-model="statusEditForm.countsAsWorkload"
+                  label="Tính vào tồn đọng nhân sự"
+                  color="primary"
+                  hide-details
+                />
                 <v-switch v-model="statusEditForm.allowMessageAppend" label="Cho bổ sung tin nhắn" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.autoSyncReplies" label="Tự đồng bộ trả lời" color="primary" hide-details />
                 <v-switch v-model="statusEditForm.requireNote" label="Yêu cầu ghi chú" color="primary" hide-details />
@@ -1148,11 +1184,129 @@
       </v-card>
     </v-dialog>
 
+    <v-dialog v-model="priorityManagerDialog" max-width="860" scrollable transition="archive-dialog-transition">
+      <v-card rounded="xl" class="priority-manager-dialog">
+        <v-card-title class="priority-manager-title">
+          <div>
+            <strong>Cấu hình mức độ ưu tiên</strong>
+            <small>Danh sách này dùng cho popup lưu hồ sơ, bộ lọc và cột Ưu tiên.</small>
+          </div>
+          <v-btn icon="mdi-close" variant="text" @click="priorityManagerDialog = false" />
+        </v-card-title>
+        <v-card-text>
+          <div class="priority-manager-list">
+            <article
+              v-for="(option, index) in priorityManagerOptions"
+              :key="`${option.key}-${index}`"
+              class="priority-manager-row"
+              :class="{ inactive: !option.isActive }"
+            >
+              <div class="priority-manager-preview">
+                <span
+                  class="priority-preview-pill"
+                  :style="priorityPreviewStyle(option.color)"
+                >
+                  {{ option.label || 'Chưa đặt tên' }}
+                </span>
+              </div>
+              <v-text-field
+                v-model="option.label"
+                label="Tên hiển thị"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+              <v-text-field
+                v-model="option.key"
+                label="Mã"
+                variant="outlined"
+                density="compact"
+                hide-details
+                :disabled="option.isBuiltIn"
+                @update:model-value="option.key = normalizePriorityKey(String($event || ''))"
+              />
+              <v-select
+                v-model="option.color"
+                :items="priorityColorOptions"
+                item-title="title"
+                item-value="value"
+                label="Màu nhanh"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+              <label class="priority-color-wheel">
+                <span>Màu tuỳ chọn</span>
+                <input
+                  :value="colorInputValue(option.color)"
+                  type="color"
+                  @input="updatePriorityCustomColor(option, $event)"
+                />
+              </label>
+              <div class="priority-manager-toggles">
+                <v-switch
+                  :model-value="option.isDefault"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  label="Mặc định"
+                  :disabled="!option.isActive"
+                  @update:model-value="setPriorityDefault(index)"
+                />
+                <v-switch
+                  v-model="option.isActive"
+                  color="primary"
+                  density="compact"
+                  hide-details
+                  label="Đang dùng"
+                  @update:model-value="handlePriorityActiveChange(index)"
+                />
+              </div>
+              <div class="priority-manager-actions">
+                <v-btn
+                  icon="mdi-chevron-up"
+                  size="x-small"
+                  variant="text"
+                  :disabled="index === 0"
+                  @click="movePriorityOption(index, -1)"
+                />
+                <v-btn
+                  icon="mdi-chevron-down"
+                  size="x-small"
+                  variant="text"
+                  :disabled="index === priorityManagerOptions.length - 1"
+                  @click="movePriorityOption(index, 1)"
+                />
+                <v-btn
+                  icon="mdi-delete-outline"
+                  size="x-small"
+                  variant="text"
+                  color="error"
+                  :disabled="priorityManagerOptions.length <= 1 || option.isBuiltIn"
+                  @click="removePriorityOption(index)"
+                />
+              </div>
+            </article>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" prepend-icon="mdi-plus" @click="addPriorityOption">Thêm mức ưu tiên</v-btn>
+          <v-btn variant="text" @click="resetPriorityOptions">Khôi phục mặc định</v-btn>
+          <v-spacer />
+          <v-btn variant="text" @click="priorityManagerDialog = false">Đóng</v-btn>
+          <v-btn color="primary" :loading="priorityManagerSaving" @click="savePriorityOptions">
+            Lưu cấu hình
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <v-dialog v-model="archiveColumnDialog" max-width="560" transition="archive-dialog-transition">
       <v-card rounded="xl" class="archive-column-dialog">
         <v-card-title>Cấu hình cột hiển thị</v-card-title>
         <v-card-subtitle>
           Kéo thả để đổi thứ tự. Cột thao tác luôn được giữ để mở chi tiết và chuyển trạng thái.
+          <span class="archive-column-source">{{ archiveColumnSourceLabel }}</span>
         </v-card-subtitle>
         <v-card-text>
           <div class="archive-column-config-list">
@@ -1199,6 +1353,16 @@
         <v-card-actions>
           <v-btn variant="text" @click="resetArchiveColumns">Khôi phục mặc định</v-btn>
           <v-spacer />
+          <v-btn
+            v-if="archiveColumnCanApplySystem"
+            color="primary"
+            variant="tonal"
+            prepend-icon="mdi-account-group-outline"
+            :loading="archiveColumnSystemSaving"
+            @click="applyArchiveColumnsForSystem"
+          >
+            Áp dụng cho toàn hệ thống
+          </v-btn>
           <v-btn color="primary" variant="flat" @click="archiveColumnDialog = false">Đóng</v-btn>
         </v-card-actions>
       </v-card>
@@ -1224,6 +1388,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import ArchiveWorkloadQuickReport from '@/components/archive/ArchiveWorkloadQuickReport.vue';
 import { resolveAttachmentUrl } from '@/utils/attachment-url';
 import { downloadAttachment } from '@/utils/download-attachment';
 import { api } from '@/api/index';
@@ -1286,6 +1451,7 @@ interface ArchiveStatusDefinition {
   isDefault: boolean;
   showOnKanban: boolean;
   showCountOnOverview: boolean;
+  countsAsWorkload: boolean;
   allowMessageAppend: boolean;
   autoSyncReplies: boolean;
   requireNote: boolean;
@@ -1405,6 +1571,7 @@ const stories = ref<ArchiveStory[]>([]);
 const total = ref(0);
 const statusCounts = ref<Record<string, number>>({});
 const handoverInboxCount = ref(0);
+const workloadRefreshKey = ref(0);
 const loading = ref(false);
 const kanbanLoadError = ref('');
 const detailDialog = ref(false);
@@ -1453,6 +1620,18 @@ interface ArchiveTableColumnPreference {
   order: number;
 }
 
+type ArchiveTableColumnPrefSource = 'user' | 'system' | 'default';
+
+interface ArchivePriorityOptionConfig {
+  key: string;
+  label: string;
+  color: string | null;
+  sortOrder: number;
+  isDefault: boolean;
+  isActive: boolean;
+  isBuiltIn?: boolean;
+}
+
 const archiveTableColumnDefinitions: ArchiveTableColumnDefinition[] = [
   { key: 'extraNote', label: 'Ghi chu khac', className: 'archive-column-extra-note' },
   { key: 'orderCode', label: 'Đơn hàng', className: 'archive-column-order-code' },
@@ -1471,6 +1650,9 @@ const archiveTableColumnDefinitions: ArchiveTableColumnDefinition[] = [
 const archiveColumnDialog = ref(false);
 const draggingArchiveColumnKey = ref<ArchiveTableColumnKey | null>(null);
 const archiveColumnPrefs = ref<ArchiveTableColumnPreference[]>([]);
+const archiveColumnPrefSource = ref<ArchiveTableColumnPrefSource>('default');
+const archiveColumnCanApplySystem = ref(false);
+const archiveColumnSystemSaving = ref(false);
 const selectedMessageIds = ref<string[]>([]);
 const messageRemoving = ref(false);
 const handoverContext = ref<ArchiveHandoverContext | null>(null);
@@ -1484,6 +1666,9 @@ const previewMediaUrl = ref('');
 const previewMedia = ref<ArchiveMedia | null>(null);
 const configDialog = ref(false);
 const configSaving = ref(false);
+const priorityManagerDialog = ref(false);
+const priorityManagerSaving = ref(false);
+const priorityManagerOptions = ref<ArchivePriorityOptionConfig[]>([]);
 const statusDefinitions = ref<ArchiveStatusDefinition[]>([]);
 const managedStatuses = ref<ArchiveStatusDefinition[]>([]);
 const canManageStatuses = ref(false);
@@ -1569,13 +1754,22 @@ const defaultPriorityOptions = [
   { title: 'Ưu tiên', value: 'high' },
   { title: 'Gấp', value: 'urgent' },
 ];
-const priorityOptions = ref([...defaultPriorityOptions]);
-const confirmationOptions = [
-  { title: 'Tất cả xác nhận', value: '' },
-  { title: 'Có', value: 'true' },
-  { title: 'Không', value: 'false' },
-  { title: 'Chưa xác định', value: 'unknown' },
+const builtInPriorityKeys = new Set(['low', 'normal', 'high', 'urgent']);
+const defaultPriorityOptionConfigs: ArchivePriorityOptionConfig[] = [
+  { key: 'low', label: 'Thấp', color: 'info', sortOrder: 10, isDefault: false, isActive: true, isBuiltIn: true },
+  { key: 'normal', label: 'Bình thường', color: 'neutral', sortOrder: 20, isDefault: true, isActive: true, isBuiltIn: true },
+  { key: 'high', label: 'Ưu tiên', color: 'warning', sortOrder: 30, isDefault: false, isActive: true, isBuiltIn: true },
+  { key: 'urgent', label: 'Gấp', color: 'error', sortOrder: 40, isDefault: false, isActive: true, isBuiltIn: true },
 ];
+const priorityColorOptions = [
+  { title: 'Xanh dương', value: 'primary' },
+  { title: 'Cam / vàng', value: 'warning' },
+  { title: 'Xanh lá', value: 'success' },
+  { title: 'Đỏ', value: 'error' },
+  { title: 'Xám', value: 'neutral' },
+  { title: 'Xanh nhạt', value: 'info' },
+];
+const priorityOptions = ref([...defaultPriorityOptions]);
 const priorityEditOptions = computed(() => priorityOptions.value.filter((item) => item.value));
 const statusOptions = computed(() => [
   { label: 'Tất cả', value: '' },
@@ -1602,6 +1796,14 @@ const archiveColumnRows = computed(() => normalizeArchiveColumnPrefs(archiveColu
 const visibleArchiveColumns = computed(() => archiveColumnRows.value
   .filter((pref) => pref.visible || pref.definition.required)
   .map((pref) => pref.definition));
+const archiveColumnSourceLabel = computed(() => ({
+  user: 'Đang dùng cấu hình cá nhân.',
+  system: 'Đang dùng cấu hình hệ thống.',
+  default: 'Đang dùng cấu hình mặc định.',
+}[archiveColumnPrefSource.value]));
+const priorityConfigMap = computed(() => new Map(
+  priorityManagerOptions.value.map((option) => [option.key, option]),
+));
 
 function archiveColumnStorageKey() {
   return `archive-table-columns:${authStore.user?.id || 'default'}`;
@@ -1635,15 +1837,21 @@ function normalizeArchiveColumnPrefs(input?: ArchiveTableColumnPreference[] | nu
 async function loadArchiveColumnPrefs() {
   try {
     const { data } = await api.get('/archive/table-column-prefs');
+    archiveColumnCanApplySystem.value = data.canApplySystem === true;
+    archiveColumnPrefSource.value = ['user', 'system', 'default'].includes(data.source)
+      ? data.source
+      : 'default';
     if (Array.isArray(data.columns) && data.columns.length > 0) {
       archiveColumnPrefs.value = normalizeArchiveColumnPrefs(data.columns);
       return;
     }
     const raw = localStorage.getItem(archiveColumnStorageKey());
+    if (raw) archiveColumnPrefSource.value = 'user';
     archiveColumnPrefs.value = normalizeArchiveColumnPrefs(raw ? JSON.parse(raw) : null);
   } catch {
     try {
       const raw = localStorage.getItem(archiveColumnStorageKey());
+      if (raw) archiveColumnPrefSource.value = 'user';
       archiveColumnPrefs.value = normalizeArchiveColumnPrefs(raw ? JSON.parse(raw) : null);
     } catch {
       archiveColumnPrefs.value = defaultArchiveColumnPrefs();
@@ -1651,26 +1859,187 @@ async function loadArchiveColumnPrefs() {
   }
 }
 
+function normalizePriorityKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function normalizePriorityOptionConfigs(input?: unknown): ArchivePriorityOptionConfig[] {
+  const rows = Array.isArray(input) ? input : [];
+  const normalized = rows
+    .map((item: any, index) => ({
+      key: normalizePriorityKey(String(item?.key || '')),
+      label: String(item?.label || '').trim(),
+      color: item?.color ? String(item.color) : 'neutral',
+      sortOrder: Number.isFinite(Number(item?.sortOrder)) ? Number(item.sortOrder) : (index + 1) * 10,
+      isDefault: item?.isDefault === true,
+      isActive: item?.isActive !== false,
+      isBuiltIn: builtInPriorityKeys.has(normalizePriorityKey(String(item?.key || ''))),
+    }))
+    .filter((item) => item.key && item.label)
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+    .map((item, index) => ({ ...item, sortOrder: (index + 1) * 10 }));
+  const usable = normalized.length ? normalized : defaultPriorityOptionConfigs.map((item) => ({ ...item }));
+  const activeDefaultIndex = usable.findIndex((item) => item.isActive && item.isDefault);
+  return usable.map((item, index) => ({
+    ...item,
+    isDefault: activeDefaultIndex >= 0 ? index === activeDefaultIndex : item.isActive && item.key === 'normal',
+  }));
+}
+
 async function loadPriorityOptions() {
   try {
     const { data } = await api.get('/archive/priority-options');
-    const options = Array.isArray(data.options)
-      ? data.options
+    const fullOptions = normalizePriorityOptionConfigs(data.options);
+    priorityManagerOptions.value = fullOptions.map((item) => ({ ...item }));
+    const options = fullOptions
         .filter((item: any) => item?.isActive !== false && item?.key && item?.label)
         .sort((left: any, right: any) => Number(left.sortOrder || 0) - Number(right.sortOrder || 0))
-        .map((item: any) => ({ title: String(item.label), value: String(item.key) }))
-      : [];
+        .map((item: any) => ({ title: String(item.label), value: String(item.key) }));
     priorityOptions.value = [
       defaultPriorityOptions[0],
       ...(options.length ? options : defaultPriorityOptions.slice(1)),
     ];
   } catch {
+    priorityManagerOptions.value = defaultPriorityOptionConfigs.map((item) => ({ ...item }));
     priorityOptions.value = [...defaultPriorityOptions];
+  }
+}
+
+async function openPriorityManager() {
+  await loadPriorityOptions();
+  priorityManagerDialog.value = true;
+}
+
+function ensurePriorityDefault() {
+  const activeOptions = priorityManagerOptions.value.filter((item) => item.isActive);
+  if (!activeOptions.length) {
+    priorityManagerOptions.value[0] = {
+      ...(priorityManagerOptions.value[0] || defaultPriorityOptionConfigs[1]),
+      isActive: true,
+    };
+  }
+  if (!priorityManagerOptions.value.some((item) => item.isActive && item.isDefault)) {
+    const index = priorityManagerOptions.value.findIndex((item) => item.isActive);
+    if (index >= 0) setPriorityDefault(index);
+  } else {
+    const defaultIndex = priorityManagerOptions.value.findIndex((item) => item.isActive && item.isDefault);
+    priorityManagerOptions.value = priorityManagerOptions.value.map((item, index) => ({
+      ...item,
+      isDefault: index === defaultIndex,
+    }));
+  }
+}
+
+function addPriorityOption() {
+  const existingKeys = new Set(priorityManagerOptions.value.map((item) => normalizePriorityKey(item.key)));
+  let next = priorityManagerOptions.value.length + 1;
+  let key = `priority_${next}`;
+  while (existingKeys.has(key)) {
+    next += 1;
+    key = `priority_${next}`;
+  }
+  priorityManagerOptions.value.push({
+    key,
+    label: 'Mức ưu tiên mới',
+    color: 'primary',
+    sortOrder: (priorityManagerOptions.value.length + 1) * 10,
+    isDefault: false,
+    isActive: true,
+    isBuiltIn: false,
+  });
+}
+
+function resetPriorityOptions() {
+  if (!window.confirm('Khôi phục danh sách mức ưu tiên mặc định?')) return;
+  priorityManagerOptions.value = defaultPriorityOptionConfigs.map((item) => ({ ...item }));
+}
+
+function movePriorityOption(index: number, direction: -1 | 1) {
+  const target = index + direction;
+  if (target < 0 || target >= priorityManagerOptions.value.length) return;
+  const reordered = [...priorityManagerOptions.value];
+  [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  priorityManagerOptions.value = reordered.map((item, nextIndex) => ({
+    ...item,
+    sortOrder: (nextIndex + 1) * 10,
+  }));
+}
+
+function removePriorityOption(index: number) {
+  const option = priorityManagerOptions.value[index];
+  if (!option || option.isBuiltIn) return;
+  priorityManagerOptions.value.splice(index, 1);
+  ensurePriorityDefault();
+}
+
+function setPriorityDefault(index: number) {
+  const selected = priorityManagerOptions.value[index];
+  if (!selected || !selected.isActive) return;
+  priorityManagerOptions.value = priorityManagerOptions.value.map((item, currentIndex) => ({
+    ...item,
+    isDefault: currentIndex === index,
+  }));
+}
+
+function handlePriorityActiveChange(index: number) {
+  const option = priorityManagerOptions.value[index];
+  if (!option) return;
+  if (!option.isActive && option.isDefault) option.isDefault = false;
+  ensurePriorityDefault();
+}
+
+function validatePriorityOptions(options: ArchivePriorityOptionConfig[]) {
+  const keys = new Set<string>();
+  for (const option of options) {
+    option.key = normalizePriorityKey(option.key);
+    option.label = option.label.trim();
+    if (!option.key || !option.label) return 'Mã và tên hiển thị là bắt buộc';
+    if (keys.has(option.key)) return `Mã "${option.key}" bị trùng`;
+    keys.add(option.key);
+  }
+  if (!options.some((item) => item.isActive)) return 'Cần ít nhất một mức ưu tiên đang dùng';
+  if (options.filter((item) => item.isActive && item.isDefault).length !== 1) {
+    return 'Cần chọn đúng một mức ưu tiên mặc định đang dùng';
+  }
+  return '';
+}
+
+async function savePriorityOptions() {
+  ensurePriorityDefault();
+  const options = priorityManagerOptions.value.map((item, index) => ({
+    key: normalizePriorityKey(item.key),
+    label: item.label.trim(),
+    color: item.color || 'neutral',
+    sortOrder: (index + 1) * 10,
+    isDefault: item.isDefault,
+    isActive: item.isActive,
+  }));
+  const error = validatePriorityOptions(options);
+  if (error) {
+    toast.error(error);
+    return;
+  }
+  priorityManagerSaving.value = true;
+  try {
+    const { data } = await api.put('/archive/priority-options', { options });
+    priorityManagerOptions.value = normalizePriorityOptionConfigs(data.options);
+    await loadPriorityOptions();
+    priorityManagerDialog.value = false;
+    toast.success('Đã lưu cấu hình mức ưu tiên');
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể lưu mức ưu tiên');
+  } finally {
+    priorityManagerSaving.value = false;
   }
 }
 
 function persistArchiveColumnPrefs() {
   archiveColumnPrefs.value = normalizeArchiveColumnPrefs(archiveColumnPrefs.value);
+  archiveColumnPrefSource.value = 'user';
   localStorage.setItem(archiveColumnStorageKey(), JSON.stringify(archiveColumnPrefs.value));
   void api.put('/archive/table-column-prefs', { columns: archiveColumnPrefs.value }).catch(() => {
     toast.error('Không thể lưu cấu hình cột lên server');
@@ -1682,9 +2051,38 @@ function openArchiveColumnDialog() {
   archiveColumnDialog.value = true;
 }
 
-function resetArchiveColumns() {
-  archiveColumnPrefs.value = defaultArchiveColumnPrefs();
-  persistArchiveColumnPrefs();
+async function resetArchiveColumns() {
+  localStorage.removeItem(archiveColumnStorageKey());
+  try {
+    const { data } = await api.delete('/archive/table-column-prefs');
+    archiveColumnCanApplySystem.value = data.canApplySystem === true;
+    archiveColumnPrefSource.value = ['system', 'default'].includes(data.source)
+      ? data.source
+      : 'default';
+    archiveColumnPrefs.value = Array.isArray(data.columns) && data.columns.length > 0
+      ? normalizeArchiveColumnPrefs(data.columns)
+      : defaultArchiveColumnPrefs();
+    toast.success(archiveColumnPrefSource.value === 'system'
+      ? 'Đã khôi phục theo cấu hình hệ thống'
+      : 'Đã khôi phục cấu hình mặc định');
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể khôi phục cấu hình cột');
+  }
+}
+
+async function applyArchiveColumnsForSystem() {
+  if (!window.confirm('Áp dụng cấu hình cột hiện tại cho toàn hệ thống?')) return;
+  archiveColumnSystemSaving.value = true;
+  try {
+    const columns = normalizeArchiveColumnPrefs(archiveColumnPrefs.value);
+    const { data } = await api.put('/archive/table-column-prefs/system', { columns });
+    archiveColumnPrefs.value = normalizeArchiveColumnPrefs(data.columns || columns);
+    toast.success('Đã áp dụng cấu hình cột cho toàn hệ thống');
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error || 'Không thể áp dụng cấu hình toàn hệ thống');
+  } finally {
+    archiveColumnSystemSaving.value = false;
+  }
 }
 
 function setArchiveColumnVisible(key: ArchiveTableColumnKey, visible: boolean) {
@@ -1971,6 +2369,7 @@ async function fetchStories() {
     total.value = data.total || 0;
     statusCounts.value = data.statusCounts || {};
     handoverInboxCount.value = Number(data.handoverInboxCount || 0);
+    workloadRefreshKey.value += 1;
   } catch (error: any) {
     const message = error?.response?.data?.error || 'Không thể tải hồ sơ';
     kanbanLoadError.value = message;
@@ -1983,6 +2382,12 @@ async function fetchStories() {
 function applyFilters() {
   pagination.value.page = 1;
   void fetchStories();
+}
+
+function selectWorkloadUser(userId: string) {
+  filters.value.assignedUserId = userId || '__all__';
+  assignedUserSearch.value = '';
+  applyFilters();
 }
 
 function toggleRecallFilter() {
@@ -2069,6 +2474,11 @@ async function loadFilterContext() {
         title: `Hồ sơ của tôi - ${String(currentName)}`,
         departmentId: data.currentDepartment?.id || null,
       },
+      {
+        value: '__unassigned__',
+        title: 'Chưa phân công',
+        departmentId: null,
+      },
       ...scopedUsers.map((item: any) => ({
         value: String(item.id),
         title: String(item.fullName || 'Chưa đặt tên'),
@@ -2144,6 +2554,7 @@ function emptyStatusEditForm() {
     isDefault: false,
     showOnKanban: true,
     showCountOnOverview: true,
+    countsAsWorkload: true,
     allowMessageAppend: true,
     autoSyncReplies: true,
     requireNote: false,
@@ -2175,6 +2586,7 @@ function editManagedStatus(status: ArchiveStatusDefinition) {
     isDefault: status.isDefault,
     showOnKanban: status.showOnKanban,
     showCountOnOverview: status.showCountOnOverview,
+    countsAsWorkload: status.countsAsWorkload ?? ['active', 'waiting'].includes(status.behaviorGroup),
     allowMessageAppend: status.allowMessageAppend,
     autoSyncReplies: status.autoSyncReplies,
     requireNote: status.requireNote,
@@ -2184,6 +2596,18 @@ function editManagedStatus(status: ArchiveStatusDefinition) {
       || status.transitionsFrom?.map((transition) => transition.toStatusId)
       || [],
   };
+}
+
+function handleStatusBehaviorChange(value: unknown) {
+  if (editingStatusId.value) return;
+  const behavior = value as ArchiveStatusDefinition['behaviorGroup'];
+  const open = ['active', 'waiting'].includes(behavior);
+  statusEditForm.value.showCountOnOverview = open;
+  statusEditForm.value.countsAsWorkload = open;
+  statusEditForm.value.allowMessageAppend = open;
+  statusEditForm.value.autoSyncReplies = open;
+  statusEditForm.value.requireNote = behavior === 'cancelled' || behavior === 'waiting';
+  statusEditForm.value.requireResult = behavior === 'completed';
 }
 
 async function saveManagedStatus() {
@@ -3078,6 +3502,7 @@ function storyStatus(story: ArchiveStory): ArchiveStatusDefinition {
     isDefault: false,
     showOnKanban: true,
     showCountOnOverview: ['active', 'waiting'].includes(behaviorGroup),
+    countsAsWorkload: ['active', 'waiting'].includes(behaviorGroup),
     allowMessageAppend: behaviorGroup === 'active',
     autoSyncReplies: behaviorGroup === 'active',
     requireNote: behaviorGroup === 'cancelled',
@@ -3140,6 +3565,83 @@ function statusPillStyle(status: ArchiveStatusDefinition) {
   } as Record<string, { color: string; background: string; borderColor: string }>)[status.colorToken]
     || { color: '#174ea6', background: '#e8f0fe', borderColor: '#c7d7f7' };
   return palette;
+}
+
+function priorityPalette(color?: string | null) {
+  const normalized = String(color || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) {
+    return {
+      color: readableTextColor(normalized),
+      background: mixHex(normalized, '#ffffff', 0.84),
+      borderColor: 'transparent',
+    };
+  }
+  return ({
+    primary: { color: '#174ea6', background: '#e8f0fe', borderColor: '#c7d7f7' },
+    warning: { color: '#c2410c', background: '#fff7ed', borderColor: '#fed7aa' },
+    success: { color: '#137333', background: '#e6f4ea', borderColor: '#b7dfc2' },
+    error: { color: '#b91c1c', background: '#fef2f2', borderColor: '#fecaca' },
+    neutral: { color: '#445064', background: '#f3f6fb', borderColor: '#d6dbea' },
+    info: { color: '#075985', background: '#e0f2fe', borderColor: '#bae6fd' },
+  } as Record<string, { color: string; background: string; borderColor: string }>)[normalized || 'neutral']
+    || { color: '#445064', background: '#f3f6fb', borderColor: '#d6dbea' };
+}
+
+function priorityPreviewStyle(color?: string | null) {
+  return priorityPalette(color);
+}
+
+function priorityPillStyle(value?: string | null) {
+  const key = value || 'normal';
+  return priorityPalette(priorityConfigMap.value.get(key)?.color);
+}
+
+function colorInputValue(color?: string | null) {
+  const normalized = String(color || '').trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) return normalized;
+  return ({
+    primary: '#174ea6',
+    warning: '#c2410c',
+    success: '#137333',
+    error: '#b91c1c',
+    neutral: '#64748b',
+    info: '#075985',
+  } as Record<string, string>)[normalized] || '#64748b';
+}
+
+function updatePriorityCustomColor(option: ArchivePriorityOptionConfig, event: Event) {
+  const value = (event.target as HTMLInputElement | null)?.value || '';
+  option.color = /^#[0-9a-f]{6}$/i.test(value) ? value : '#64748b';
+}
+
+function hexToRgb(hex: string) {
+  const normalized = hex.replace('#', '');
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  return `#${[r, g, b].map((value) => Math.round(value).toString(16).padStart(2, '0')).join('')}`;
+}
+
+function mixHex(color: string, base: string, baseWeight: number) {
+  const foreground = hexToRgb(color);
+  const background = hexToRgb(base);
+  return rgbToHex(
+    foreground.r * (1 - baseWeight) + background.r * baseWeight,
+    foreground.g * (1 - baseWeight) + background.g * baseWeight,
+    foreground.b * (1 - baseWeight) + background.b * baseWeight,
+  );
+}
+
+function readableTextColor(hex: string) {
+  const { r, g, b } = hexToRgb(hex);
+  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  if (luminance < 0.42) return hex;
+  return mixHex(hex, '#000000', 0.18);
 }
 
 function kanbanColumnStyle(status: ArchiveStatusDefinition) {
@@ -3318,6 +3820,11 @@ h1 {
   min-height: 52px;
   border-radius: 16px;
   font-weight: 700;
+}
+
+.config-trigger--labeled {
+  min-width: 88px;
+  padding-inline: 12px;
 }
 
 .archive-toolbar {
@@ -3525,7 +4032,8 @@ h1 {
   grid-template-columns: minmax(250px, 1.05fr) minmax(360px, 1.6fr) minmax(280px, .88fr);
   gap: 0;
   padding: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .view-list .story-heading,
@@ -5299,7 +5807,7 @@ footer {
 
   .status-pill {
     padding: 5px 12px;
-    border: 1px solid #bec6e0;
+    border: 0;
     border-radius: 999px;
     color: #3f465c;
     background: #dae2fd;
@@ -5312,7 +5820,7 @@ footer {
     align-items: center;
     padding: 4px 10px;
     border-radius: 999px;
-    border: 1px solid #d6dbea;
+    border: 0;
     color: #445064;
     background: #f3f6fb;
     font-size: 12px;
@@ -6054,13 +6562,21 @@ footer {
 .archive-column-title { width: 12%; }
 .archive-column-customer { width: 12%; }
 .archive-column-received-at { width: 10%; }
-.archive-column-priority { width: 8%; }
+.archive-column-priority {
+  width: 112px;
+  min-width: 112px;
+  max-width: 112px;
+}
 .archive-column-confirmation { width: 8%; }
 .archive-column-extra-note { width: 10%; }
 .archive-column-last-message { width: 22%; }
 .archive-column-department { width: 10%; }
 .archive-column-assignee { width: 11%; }
-.archive-column-status { width: 8%; }
+.archive-column-status {
+  width: 104px;
+  min-width: 104px;
+  max-width: 104px;
+}
 .archive-column-actions {
   width: 64px;
   text-align: center;
@@ -6104,8 +6620,44 @@ footer {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, .12);
 }
 
-.archive-inline-select {
-  min-width: 118px;
+.archive-inline-priority-select {
+  position: relative;
+  padding: 0;
+}
+
+.archive-inline-priority-select select {
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
+  padding: 4px 24px 4px 10px;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  appearance: none;
+}
+
+.archive-inline-priority-select select:focus {
+  outline: 0;
+  box-shadow: none;
+}
+
+.archive-inline-priority-select select option {
+  color: #111827;
+  background: #fff;
+}
+
+.archive-inline-priority-select .v-icon {
+  position: absolute;
+  right: 7px;
+  color: inherit;
+  opacity: .82;
+  pointer-events: none;
 }
 
 .archive-table td > strong,
@@ -6172,11 +6724,30 @@ footer {
 
 .status-pill {
   display: inline-flex;
+  width: 76px;
   min-height: 20px;
   padding: 2px 8px;
   align-items: center;
+  justify-content: center;
+  border: 0;
   font-size: 10px;
+  font-weight: 700;
   white-space: nowrap;
+}
+
+.archive-table .priority-pill {
+  width: 92px;
+  min-width: 92px;
+  max-width: 92px;
+  justify-content: center;
+  border: 0;
+}
+
+.archive-table .status-pill {
+  width: 76px;
+  min-width: 76px;
+  max-width: 76px;
+  border: 0;
 }
 
 .archive-pagination {
@@ -6198,6 +6769,39 @@ footer {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.archive-pagination-info {
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.archive-workload-legend {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #64748b;
+}
+
+.archive-workload-legend span {
+  display: inline-flex;
+  min-height: 24px;
+  padding: 3px 7px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #d8e0ec;
+  border-radius: 999px;
+  background: #fff;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.archive-workload-legend b {
+  color: #1d4ed8;
+  font-weight: 800;
 }
 
 .archive-pagination select {
@@ -6610,8 +7214,9 @@ footer {
   width: 212px;
   min-width: 212px;
   min-height: 0;
-  padding: 16px;
-  overflow: hidden;
+  padding: 16px 16px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   flex-direction: column;
   border-right: 1px solid #c3c6d7;
   background: #f7f9fb;
@@ -6703,9 +7308,9 @@ footer {
 .archive-filter-fields {
   display: flex;
   min-height: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .archive-filter-field {
@@ -6807,13 +7412,18 @@ footer {
 }
 
 .archive-filter-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
   display: flex;
   box-sizing: border-box;
   width: calc(100% + 32px);
-  margin: auto -16px -16px;
-  padding: 16px;
+  min-height: 96px;
+  margin: auto -16px 0;
+  padding: 10px 16px;
   flex: 0 0 auto;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 8px;
   border-top: 1px solid #d7dae3;
   background: #f7f9fb;
@@ -6890,7 +7500,7 @@ footer {
 
 .archive-filter-refresh {
   width: 100%;
-  min-height: 36px;
+  min-height: 38px;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 600;
@@ -7150,7 +7760,7 @@ footer {
 .status-pill {
   display: inline-flex;
   align-items: center;
-  border: 1px solid currentColor;
+  border: 0;
   border-radius: 999px;
 }
 
@@ -7505,9 +8115,116 @@ footer {
 .archive-kanban-skeleton span:nth-child(3) { width: 100%; height: 42px; border-radius: 5px; }
 .archive-kanban-skeleton span:nth-child(4) { width: 62%; }
 
+.priority-manager-dialog :deep(.v-card-text) {
+  padding-top: 8px;
+}
+
+.priority-manager-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.priority-manager-title strong,
 .archive-column-dialog :deep(.v-card-title) {
   font-size: 20px;
   font-weight: 800;
+}
+
+.priority-manager-title small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.archive-column-source {
+  display: block;
+  margin-top: 4px;
+  color: #475569;
+  font-weight: 700;
+}
+
+.priority-manager-list {
+  display: grid;
+  gap: 10px;
+}
+
+.priority-manager-row {
+  display: grid;
+  align-items: center;
+  min-height: 74px;
+  padding: 10px;
+  grid-template-columns: 118px minmax(130px, 1fr) minmax(110px, .72fr) 132px 96px 150px auto;
+  gap: 10px;
+  border: 1px solid #d8deea;
+  border-radius: 10px;
+  background: #fff;
+  transition: border-color .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+
+.priority-manager-row:hover {
+  border-color: #9fb4d8;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .08);
+}
+
+.priority-manager-row.inactive {
+  opacity: .62;
+}
+
+.priority-manager-preview {
+  min-width: 0;
+}
+
+.priority-preview-pill {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: 5px 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.priority-manager-toggles {
+  display: grid;
+  gap: 4px;
+}
+
+.priority-manager-toggles :deep(.v-label) {
+  font-size: 12px;
+}
+
+.priority-color-wheel {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.priority-color-wheel input {
+  width: 54px;
+  height: 34px;
+  padding: 2px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.priority-manager-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
 }
 
 .archive-column-config-list {
@@ -7576,6 +8293,14 @@ footer {
     grid-template-columns: 1fr;
   }
 
+  .priority-manager-row {
+    grid-template-columns: 1fr;
+  }
+
+  .priority-manager-actions {
+    justify-content: flex-start;
+  }
+
   .archive-kanban-board {
     min-height: 520px;
     grid-auto-columns: minmax(280px, 72vw);
@@ -7612,7 +8337,13 @@ footer {
     gap: 10px;
   }
 
+  .archive-workload-report {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
   .archive-filter-footer {
+    grid-column: 1 / -1;
     width: 100%;
     margin: 0;
     padding: 0;

@@ -17,8 +17,9 @@
  *   - getPresets() / createPreset() / updatePreset() / deletePreset() / usePreset()
  *   - buildQueryParams() — convert state → URLSearchParams cho GET /conversations
  */
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import { api } from '@/api/index';
+import { useAuthStore } from '@/stores/auth';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -74,6 +75,8 @@ export type ZaloLabelMatchMode = 'or' | 'and';
 
 const DEFAULT_ACTIVE_TAB: ActiveTab = 'main';
 const LAST_ACTIVE_TAB_STORAGE_KEY = 'zalocrm.chat.lastActiveTab';
+const PERSISTED_FILTER_STORAGE_KEY_PREFIX = 'zalocrm.chat.filterState';
+const PERSISTED_FILTER_STORAGE_VERSION = 1;
 
 function isActiveTab(value: unknown): value is ActiveTab {
   return value === 'personal' || value === 'group' || value === 'main' || value === 'other';
@@ -96,6 +99,62 @@ function saveLastActiveTab(tab: ActiveTab) {
   } catch {
     // Ignore storage errors in private mode or quota-limited browsers.
   }
+}
+
+interface PersistedInboxFilterState {
+  version: typeof PERSISTED_FILTER_STORAGE_VERSION;
+  folderId: string | null;
+  tagsZalo: string[];
+  zaloLabelMode: ZaloLabelMatchMode;
+}
+
+function persistedFilterStorageKey(userId?: string | null): string {
+  return `${PERSISTED_FILTER_STORAGE_KEY_PREFIX}:${userId || 'default'}`;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+function loadPersistedFilterState(userId?: string | null): PersistedInboxFilterState | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(persistedFilterStorageKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedInboxFilterState>;
+    return {
+      version: PERSISTED_FILTER_STORAGE_VERSION,
+      folderId: typeof parsed.folderId === 'string' && parsed.folderId ? parsed.folderId : null,
+      tagsZalo: normalizeStringArray(parsed.tagsZalo),
+      zaloLabelMode: parsed.zaloLabelMode === 'and' ? 'and' : 'or',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function savePersistedFilterState(state: FilterState, userId?: string | null) {
+  if (typeof window === 'undefined') return;
+  const payload: PersistedInboxFilterState = {
+    version: PERSISTED_FILTER_STORAGE_VERSION,
+    folderId: state.folderId,
+    tagsZalo: state.tagsZalo,
+    zaloLabelMode: state.zaloLabelMode,
+  };
+  try {
+    window.localStorage.setItem(persistedFilterStorageKey(userId), JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors in private mode or quota-limited browsers.
+  }
+}
+
+function applyPersistedFilterState(state: FilterState, userId?: string | null) {
+  const saved = loadPersistedFilterState(userId);
+  if (!saved) return;
+  state.folderId = saved.folderId;
+  state.tagsZalo = saved.tagsZalo;
+  state.zaloLabelMode = saved.zaloLabelMode;
 }
 
 export interface FilterState {
@@ -172,11 +231,23 @@ export function defaultFilterState(): FilterState {
 // ─── Composable ─────────────────────────────────────────────────────────
 
 export function useInboxFilters() {
+  const authStore = useAuthStore();
   const state = reactive<FilterState>(defaultFilterState());
+  applyPersistedFilterState(state, authStore.user?.id);
   const folders = ref<AccountFolder[]>([]);
   const presets = ref<SavedFilterPreset[]>([]);
   const activePresetId = ref<string | null>(null);
   const loading = ref(false);
+
+  watch(
+    () => ({
+      folderId: state.folderId,
+      tagsZalo: [...state.tagsZalo],
+      zaloLabelMode: state.zaloLabelMode,
+    }),
+    () => savePersistedFilterState(state, authStore.user?.id),
+    { deep: true },
+  );
 
   // ─── Folder API ───────────────────────────────────────────────────────
   async function fetchFolders() {

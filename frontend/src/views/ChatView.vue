@@ -177,6 +177,43 @@ const workspaceName = computed(() => authStore.user?.fullName?.split(' ')[0] || 
 const currentUserName = computed(() => authStore.user?.fullName || 'Tôi');
 const currentUserId = computed(() => authStore.user?.id || '');
 const showFolderManagePopup = ref(false);
+const CHAT_ACCOUNT_FILTER_STORAGE_KEY_PREFIX = 'zalocrm.chat.accountFilter';
+
+function chatAccountFilterStorageKey(): string {
+  return `${CHAT_ACCOUNT_FILTER_STORAGE_KEY_PREFIX}:${currentUserId.value || 'default'}`;
+}
+
+function persistChatAccountFilter(id: string | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (id) window.localStorage.setItem(chatAccountFilterStorageKey(), id);
+    else window.localStorage.removeItem(chatAccountFilterStorageKey());
+  } catch {
+    // Ignore storage errors in private mode or quota-limited browsers.
+  }
+}
+
+function setChatAccountFilter(id: string | null, persist = true) {
+  accountFilter.value = id;
+  selectedAccountIds.value = id ? [id] : [];
+  if (persist) persistChatAccountFilter(id);
+}
+
+function restoreChatAccountFilter() {
+  if (typeof window === 'undefined') return;
+  try {
+    const savedAccountId = window.localStorage.getItem(chatAccountFilterStorageKey());
+    if (!savedAccountId) return;
+    const accountExists = zaloAccounts.value.some((account) => account.id === savedAccountId);
+    if (accountExists) {
+      setChatAccountFilter(savedAccountId, false);
+      return;
+    }
+    window.localStorage.removeItem(chatAccountFilterStorageKey());
+  } catch {
+    // Ignore storage errors in private mode or quota-limited browsers.
+  }
+}
 
 const totalUnreadCount = computed(() =>
   conversations.value.reduce((sum, c) => sum + ((c as any).unreadCount || 0), 0)
@@ -329,12 +366,12 @@ function onTyping() {
   if (selectedConvId.value) sendTypingEvent(selectedConvId.value);
 }
 function onFilterAccount(id: string | null) {
-  accountFilter.value = id;
+  setChatAccountFilter(id);
   fetchConversations();
 }
 function onFolderViewApplied(payload: { folderId: string | null; accountId: string | null }) {
   inboxFilters.setFolder(payload.folderId);
-  accountFilter.value = payload.accountId;
+  setChatAccountFilter(payload.accountId);
   fetchConversations();
 }
 function onFiltersUpdate(params: Record<string, string>) {
@@ -537,6 +574,7 @@ function onLabelsSynced() {
 onMounted(async () => {
   if (!isMobile.value) {
     await fetchZaloAccounts();
+    restoreChatAccountFilter();
     fetchConversations();
     fetchAiConfig();
     initSocket();
