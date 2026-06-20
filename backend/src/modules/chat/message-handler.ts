@@ -13,6 +13,7 @@ import { syncReminderFromMessage } from '../contacts/reminder-sync.js';
 import { uploadBuffer } from '../../shared/storage/minio-client.js';
 import { config } from '../../config/index.js';
 import { syncReplyMessageToArchive } from '../archive/archive-reply-sync-service.js';
+import { ensureNativeMessage, observeNativeGroup } from '../zalo/shared-group-service.js';
 
 export interface IncomingMessage {
   accountId: string;
@@ -37,6 +38,9 @@ export interface IncomingMessage {
   groupName?: string;       // group name if group message
   groupAvatarUrl?: string;  // group avatar URL from Zalo (via getGroupInfo.avt)
   groupMembersCount?: number; // total members in group
+  groupGlobalId?: string;     // shared across viewer accounts
+  groupDescription?: string;
+  groupType?: number;
   attachments?: any[];
   quote?: unknown;
   albumKey?: string | null;
@@ -241,6 +245,19 @@ export async function handleIncomingMessage(
 
     const contactId = await upsertContact(msg, account.orgId);
 
+    const observedNativeGroupId = msg.threadType === 'group' && msg.groupGlobalId
+      ? await observeNativeGroup({
+          orgId: account.orgId,
+          zaloAccountId: msg.accountId,
+          accountScopedGroupId: msg.threadId,
+          globalId: msg.groupGlobalId,
+          name: msg.groupName,
+          avatarUrl: msg.groupAvatarUrl,
+          description: msg.groupDescription,
+          groupType: msg.groupType,
+        })
+      : null;
+
     // Update lastActivity for lead scoring freshness
     if (contactId) {
       prisma.contact.update({
@@ -249,9 +266,21 @@ export async function handleIncomingMessage(
       }).catch(() => {});
     }
 
-    const conversation = await findOrCreateConversation(msg, account.orgId, contactId);
+    const conversation = await findOrCreateConversation(
+      msg,
+      account.orgId,
+      contactId,
+      observedNativeGroupId,
+    );
 
     const sentAt = new Date(msg.timestamp);
+    const nativeZaloMessageId = await ensureNativeMessage({
+      orgId: account.orgId,
+      nativeGroupId: conversation.nativeGroupId,
+      zaloMsgId: msg.msgId,
+      senderGlobalId: msg.contactGlobalId,
+      sentAt,
+    });
 
     // Dedup guard for self messages: if a self message exists in the last 30s, this is likely a selfListen echo of a CRM-sent message
     if (msg.isSelf && msg.msgId) {
@@ -272,7 +301,7 @@ export async function handleIncomingMessage(
       const recentDupe = await prisma.message.findFirst({
         where: dupeWhere,
         orderBy: { sentAt: 'desc' },
-        select: { id: true, zaloMsgId: true },
+        select: { id: true, zaloMsgId: true, nativeZaloMessageId: true },
       });
       if (recentDupe) {
         if (!recentDupe.zaloMsgId && msg.msgId) {
@@ -280,7 +309,11 @@ export async function handleIncomingMessage(
           const dupNum = /^\d+$/.test(msg.msgId) ? BigInt(msg.msgId) : null;
           await prisma.message.update({
             where: { id: recentDupe.id },
-            data: { zaloMsgId: msg.msgId, zaloMsgIdNum: dupNum },
+            data: {
+              zaloMsgId: msg.msgId,
+              zaloMsgIdNum: dupNum,
+              ...(nativeZaloMessageId ? { nativeZaloMessageId } : {}),
+            },
           }).catch(() => {});
         }
         // FIX 2026-05-21: row CRM-sent insert TRƯỚC khi nhận echo nên thiếu cliMsgId.
@@ -289,6 +322,12 @@ export async function handleIncomingMessage(
           await prisma.message.update({
             where: { id: recentDupe.id },
             data: { zaloCliMsgId: msg.cliMsgId },
+          }).catch(() => {});
+        }
+        if (nativeZaloMessageId && recentDupe.nativeZaloMessageId !== nativeZaloMessageId) {
+          await prisma.message.update({
+            where: { id: recentDupe.id },
+            data: { nativeZaloMessageId },
           }).catch(() => {});
         }
         logger.debug(`[message-handler] Skipping self echo: ${isAttachment ? 'attachment' : 'content'} match within 30s`);
@@ -306,6 +345,7 @@ export async function handleIncomingMessage(
         data: {
           id: randomUUID(),
           conversationId: conversation.id,
+          nativeZaloMessageId,
           zaloMsgId: msg.msgId || null,
           zaloMsgIdNum,
           // 2026-05-21: cliMsgId Zalo client counter — cần cho api.undo
@@ -720,18 +760,33 @@ async function findOrCreateConversation(
   msg: IncomingMessage,
   orgId: string,
   contactId: string | null,
+  observedNativeGroupId: string | null,
 ) {
   const externalThreadId = msg.threadId;
 
   const existing = await prisma.conversation.findFirst({
     where: { zaloAccountId: msg.accountId, externalThreadId },
-    select: { id: true, groupName: true, groupAvatarUrl: true, groupMembersCount: true },
+    select: {
+      id: true,
+      nativeGroupId: true,
+      groupName: true,
+      groupAvatarUrl: true,
+      groupMembersCount: true,
+    },
   });
 
   if (existing) {
     // Update group metadata if changed (sync mới hơn so với DB)
     if (msg.threadType === 'group') {
-      const updates: { groupName?: string; groupAvatarUrl?: string; groupMembersCount?: number } = {};
+      const updates: {
+        nativeGroupId?: string;
+        groupName?: string;
+        groupAvatarUrl?: string;
+        groupMembersCount?: number;
+      } = {};
+      if (observedNativeGroupId && observedNativeGroupId !== existing.nativeGroupId) {
+        updates.nativeGroupId = observedNativeGroupId;
+      }
       if (msg.groupName && msg.groupName !== existing.groupName) updates.groupName = msg.groupName;
       if (msg.groupAvatarUrl && msg.groupAvatarUrl !== existing.groupAvatarUrl) updates.groupAvatarUrl = msg.groupAvatarUrl;
       if (msg.groupMembersCount != null && msg.groupMembersCount !== existing.groupMembersCount) {
@@ -741,7 +796,10 @@ async function findOrCreateConversation(
         await prisma.conversation.update({ where: { id: existing.id }, data: updates });
       }
     }
-    return { id: existing.id };
+    return {
+      id: existing.id,
+      nativeGroupId: observedNativeGroupId || existing.nativeGroupId,
+    };
   }
 
   return prisma.conversation.create({
@@ -752,6 +810,7 @@ async function findOrCreateConversation(
       contactId: msg.threadType === 'user' ? contactId : contactId,
       threadType: msg.threadType,
       externalThreadId,
+      nativeGroupId: msg.threadType === 'group' ? observedNativeGroupId : null,
       groupName: msg.threadType === 'group' ? msg.groupName : null,
       groupAvatarUrl: msg.threadType === 'group' ? msg.groupAvatarUrl : null,
       groupMembersCount: msg.threadType === 'group' ? msg.groupMembersCount : null,
@@ -759,7 +818,7 @@ async function findOrCreateConversation(
       unreadCount: msg.isSelf ? 0 : 1,
       isReplied: msg.isSelf,
     },
-    select: { id: true },
+    select: { id: true, nativeGroupId: true },
   });
 }
 

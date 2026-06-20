@@ -1786,6 +1786,9 @@ interface ArchiveHandoverUser {
   id: string;
   fullName: string;
   assignmentRole?: string;
+  handlingZaloAccountId?: string;
+  handlingZaloAccountName?: string | null;
+  sharedGroupAccess?: boolean;
 }
 
 interface ArchiveHandoverRequest {
@@ -2489,7 +2492,7 @@ const handoverCandidateOptions = computed(() => {
   return candidates.map((user) => ({
     value: user.id,
     title: user.assignmentRole
-      ? `${user.fullName} · ${assignmentRoleLabel(user.assignmentRole)}`
+      ? `${user.fullName} · ${assignmentRoleLabel(user.assignmentRole)}${user.handlingZaloAccountName ? ` · ${user.handlingZaloAccountName}` : ''}`
       : user.fullName,
   }));
 });

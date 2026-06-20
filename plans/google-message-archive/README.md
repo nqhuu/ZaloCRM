@@ -16,6 +16,7 @@ Tài liệu kỹ thuật chi tiết:
 - [`03-customer-search-account-retention-auto-sync.md`](03-customer-search-account-retention-auto-sync.md): tìm khách hàng, giữ hồ sơ khi xoá Zalo và tự đồng bộ trả lời.
 - [`04-message-archive-indicator-and-status-workflow.md`](04-message-archive-indicator-and-status-workflow.md): biểu tượng hồ sơ trên tin nhắn và trạng thái cấu hình được.
 - [`05-zalo-account-department-and-assignee-rules.md`](05-zalo-account-department-and-assignee-rules.md): phòng ban, người phụ trách chính/phụ và uỷ quyền theo ngày.
+- [`16-shared-zalo-groups-customer-classification-and-crm-tags.md`](16-shared-zalo-groups-customer-classification-and-crm-tags.md): nhóm Zalo chung theo `globalId`, chống trùng tin nhắn, liên kết hồ sơ khách hàng, CRM tag độc lập và phân công user chính/phụ.
 
 ## Trạng thái hiện tại
 

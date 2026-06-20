@@ -20,6 +20,11 @@ import { logger } from '../../shared/utils/logger.js';
 import { zaloPool } from './zalo-pool.js';
 import { logActivity } from '../activity/activity-logger.js';
 
+// Native labels and CRM workload tags are separate domains. Legacy mirrored
+// CrmTag rows remain readable during migration, but sync no longer creates or
+// mutates them and never pushes CRM tags back to Zalo.
+const MIRROR_NATIVE_LABELS_TO_CRM_TAGS = false;
+
 type LabelDataFromSdk = {
   id: number | string;
   text: string;
@@ -193,7 +198,7 @@ export async function syncLabelsForAccount(
   // Delta mode SKIP toàn bộ CrmTag block: assign không đổi label name/color/emoji,
   // chỉ đổi conversations[]. CrmTag definitions giữ nguyên. Full sync (cron/manual)
   // sẽ reconcile CrmTag cho external changes (label tạo/xoá/đổi tên trên Zalo Real).
-  if (!isDelta) {
+  if (MIRROR_NATIVE_LABELS_TO_CRM_TAGS && !isDelta) {
     const account = await prisma.zaloAccount.findUnique({
       where: { id: accountId },
       select: { displayName: true, phone: true },
@@ -331,7 +336,7 @@ export async function syncLabelsForAccount(
     where: isDelta
       ? { zaloAccountId: accountId, zaloUidInNick: { in: opts!.affectedUidsOnly! } }
       : { zaloAccountId: accountId },
-    select: { id: true, zaloUidInNick: true, contactId: true, zaloLabels: true, crmTagsPerNick: true },
+    select: { id: true, zaloUidInNick: true, contactId: true, zaloLabels: true },
   });
   let friendsUpdated = 0;
   for (const f of friendsFull) {
@@ -342,29 +347,11 @@ export async function syncLabelsForAccount(
     const addedLabels = [...newNames].filter(n => !oldNames.has(n));
     const removedLabels = [...oldNames].filter(n => !newNames.has(n));
 
-    // Mirror sang crmTagsPerNick: remove tag "🔵 {oldLabel}" + add tag "🔵 {newLabel}".
-    // Lưu ý: emoji 🔵 (U+1F535) là surrogate pair — JS string length = 2 code units,
-    // cộng dấu cách = 3 ký tự. PHẢI dùng prefix constant để strip; slice(2) sẽ để lại
-    // dấu cách → labelName = " 1688" → never matches newNames → strip toàn bộ mirror tag.
-    const MIRROR_PREFIX = '🔵 ';
-    const oldCrmTags = Array.isArray(f.crmTagsPerNick) ? (f.crmTagsPerNick as string[]) : [];
-    let newCrmTags = oldCrmTags.filter(t => {
-      // Giữ lại tag KHÔNG phải Zalo-mirrored, hoặc tag Zalo-mirrored mà vẫn còn trong newNames
-      if (!t.startsWith(MIRROR_PREFIX)) return true;
-      const labelName = t.slice(MIRROR_PREFIX.length);
-      return newNames.has(labelName);
-    });
-    for (const labelName of addedLabels) {
-      const mirroredTag = `🔵 ${labelName}`;
-      if (!newCrmTags.includes(mirroredTag)) newCrmTags.push(mirroredTag);
-    }
-
     await prisma.friend.update({
       where: { id: f.id },
       data: {
         zaloLabels: newLabels,
         zaloLabelsSyncedAt: new Date(),
-        crmTagsPerNick: newCrmTags,
       },
     });
     friendsUpdated++;

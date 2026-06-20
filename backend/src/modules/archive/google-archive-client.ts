@@ -113,6 +113,20 @@ export async function appendSheetRows(input: {
   return parseFirstRow(data.updates?.updatedRange);
 }
 
+export async function readSheetRows(input: {
+  spreadsheetId: string;
+  sheetName: string;
+  range?: string;
+}): Promise<unknown[][]> {
+  const target = `${quoteSheet(input.sheetName)}!${input.range || 'A:Z'}`;
+  const response = await googleFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}/values/${encodeURIComponent(target)}?majorDimension=ROWS`,
+    { method: 'GET', signal: AbortSignal.timeout(30_000) },
+  );
+  const data = await response.json() as { values?: unknown[][] };
+  return Array.isArray(data.values) ? data.values : [];
+}
+
 export async function updateSheetRow(input: {
   spreadsheetId: string;
   sheetName: string;

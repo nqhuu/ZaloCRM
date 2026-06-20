@@ -236,8 +236,13 @@ export async function backfillAccountHistory(api: any, accountId: string): Promi
   try {
     const groupsRaw = await api.getAllGroups();
     // getAllGroups returns { gridVerMap: {...}, gridInfoMap: { groupId: { groupInfo... } } }
-    const gridInfoMap = groupsRaw?.gridInfoMap || groupsRaw || {};
-    groups = Object.values(gridInfoMap) as any[];
+    if (groupsRaw?.gridInfoMap) {
+      groups = Object.values(groupsRaw.gridInfoMap) as any[];
+    } else if (groupsRaw?.gridVerMap) {
+      groups = Object.keys(groupsRaw.gridVerMap).map((groupId) => ({ groupId }));
+    } else {
+      groups = Object.values(groupsRaw || {}) as any[];
+    }
   } catch (err) {
     result.errors++;
     logger.warn(`[backfill:${accountId}] getAllGroups failed:`, err);
@@ -250,9 +255,14 @@ export async function backfillAccountHistory(api: any, accountId: string): Promi
     if (!groupId) continue;
 
     try {
-      const groupName = group?.name || group?.groupName || 'Nhóm';
-      const groupAvatar = group?.avt || group?.avatar || null;
-      const membersCount = group?.totalMember ?? group?.memberCount ?? null;
+      let groupInfo = group;
+      if (!groupInfo?.globalId) {
+        const detail = await api.getGroupInfo(groupId);
+        groupInfo = detail?.gridInfoMap?.[groupId] || group;
+      }
+      const groupName = groupInfo?.name || groupInfo?.groupName || 'Nhóm';
+      const groupAvatar = groupInfo?.avt || groupInfo?.avatar || null;
+      const membersCount = groupInfo?.totalMember ?? groupInfo?.memberCount ?? null;
 
       const history = await api.getGroupChatHistory(groupId, MESSAGES_PER_GROUP);
       const messages = history?.groupMsgs || history?.data?.groupMsgs || [];
@@ -282,6 +292,9 @@ export async function backfillAccountHistory(api: any, accountId: string): Promi
             groupName,
             groupAvatarUrl: groupAvatar || undefined,
             groupMembersCount: typeof membersCount === 'number' ? membersCount : undefined,
+            groupGlobalId: String(groupInfo?.globalId || '') || undefined,
+            groupDescription: groupInfo?.desc || undefined,
+            groupType: typeof groupInfo?.type === 'number' ? groupInfo.type : undefined,
             attachments: [],
             quote: msg?.data?.quote,
             albumKey: album.albumKey,

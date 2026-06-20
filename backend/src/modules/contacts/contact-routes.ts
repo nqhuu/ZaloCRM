@@ -18,6 +18,8 @@ import { runAutomationRules } from '../automation/automation-service.js';
 import { normalizePhone } from '../../shared/utils/phone.js';
 import { logActivity, computeDiff } from '../activity/activity-logger.js';
 import { emitWebhook } from '../api/webhook-service.js';
+import { zaloOps } from '../../shared/zalo-operations.js';
+import { groupInfoFromResponse, observeGroupInfo } from '../zalo/shared-group-service.js';
 
 type QueryParams = Record<string, string>;
 
@@ -986,6 +988,23 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       if (!account) return reply.status(404).send({ error: 'Zalo account not found' });
       if (!groupId) return reply.status(400).send({ error: 'groupId required' });
 
+      let nativeGroupId: string | null = null;
+      let groupInfo: any = null;
+      try {
+        const response = await zaloOps.getGroupInfo(accountId, groupId);
+        groupInfo = groupInfoFromResponse(response, groupId);
+        if (groupInfo?.globalId) {
+          nativeGroupId = await observeGroupInfo({
+            orgId: user.orgId,
+            zaloAccountId: accountId,
+            accountScopedGroupId: groupId,
+            info: groupInfo,
+          });
+        }
+      } catch (error) {
+        logger.warn(`[groups] canonical identity lookup failed account=${accountId} group=${groupId}`, error);
+      }
+
       // Find existing — group conv uniqueness: (zaloAccountId, externalThreadId, threadType='group')
       const existing = await prisma.conversation.findFirst({
         where: {
@@ -993,9 +1012,14 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
           externalThreadId: groupId,
           threadType: 'group',
         },
-        select: { id: true },
+        select: { id: true, nativeGroupId: true },
       });
-      if (existing) return reply.send({ conversationId: existing.id, created: false });
+      if (existing) {
+        if (nativeGroupId && existing.nativeGroupId !== nativeGroupId) {
+          await prisma.conversation.update({ where: { id: existing.id }, data: { nativeGroupId } });
+        }
+        return reply.send({ conversationId: existing.id, nativeGroupId, created: false });
+      }
 
       // Group conv chưa có → tạo. Note: contactId nullable (group conv không bind 1
       // contact cụ thể, listener sẽ tạo group-contact khi có msg đầu).
@@ -1006,13 +1030,17 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
           contactId: null,
           threadType: 'group',
           externalThreadId: groupId,
+          nativeGroupId,
+          groupName: groupInfo?.name || null,
+          groupAvatarUrl: groupInfo?.avt || groupInfo?.fullAvt || null,
+          groupMembersCount: typeof groupInfo?.totalMember === 'number' ? groupInfo.totalMember : null,
           lastMessageAt: new Date(),
           unreadCount: 0,
           isReplied: false,
         },
         select: { id: true },
       });
-      return reply.send({ conversationId: created.id, created: true });
+      return reply.send({ conversationId: created.id, nativeGroupId, created: true });
     } catch (err) {
       logger.error('[groups] ensure-conversation error:', err);
       return reply.status(500).send({ error: 'Ensure conversation failed', detail: String(err) });

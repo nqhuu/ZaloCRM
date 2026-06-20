@@ -20,6 +20,7 @@ export async function getArchiveHandoverContext(actor: ArchiveActor, storyId: st
       departmentId: true,
       assignedUserId: true,
       businessStatus: true,
+      conversation: { select: { nativeGroupId: true } },
       assignedUser: { select: { id: true, fullName: true } },
       transferRequests: {
         where: { status: 'pending' },
@@ -41,19 +42,31 @@ export async function getArchiveHandoverContext(actor: ArchiveActor, storyId: st
 
   const [eligibleRecipients, canOverride] = await Promise.all([
     story.assignedUserId === actor.id
-      ? findEligibleSecondaryAssignees(story.zaloAccountId, story.departmentId, story.assignedUserId)
+      ? findEligibleHandoverAssignees({
+          zaloAccountId: story.zaloAccountId,
+          nativeGroupId: story.conversation.nativeGroupId,
+          departmentId: story.departmentId,
+          excludeUserId: story.assignedUserId,
+        })
       : Promise.resolve([]),
     canManagerOverrideAssignment(actor, story.departmentId),
   ]);
 
   let managerCandidates: Array<{ id: string; fullName: string }> = [];
   if (canOverride && story.departmentId) {
-    managerCandidates = await findZaloHandlingCandidates({
-      orgId: actor.orgId,
-      zaloAccountId: story.zaloAccountId,
-      departmentId: story.departmentId,
-      excludeUserId: story.assignedUserId,
-    });
+    managerCandidates = story.conversation.nativeGroupId
+      ? await findEligibleHandoverAssignees({
+          zaloAccountId: story.zaloAccountId,
+          nativeGroupId: story.conversation.nativeGroupId,
+          departmentId: story.departmentId,
+          excludeUserId: story.assignedUserId,
+        })
+      : await findZaloHandlingCandidates({
+          orgId: actor.orgId,
+          zaloAccountId: story.zaloAccountId,
+          departmentId: story.departmentId,
+          excludeUserId: story.assignedUserId,
+        });
   }
 
   return {
@@ -89,6 +102,7 @@ export async function createArchiveHandoverRequest(input: {
       departmentId: true,
       assignedUserId: true,
       businessStatus: true,
+      conversation: { select: { nativeGroupId: true } },
       assignedUser: { select: { fullName: true } },
     },
   });
@@ -103,7 +117,11 @@ export async function createArchiveHandoverRequest(input: {
     throw new HandoverError('Người nhận phải khác người xử lý hiện tại');
   }
 
-  const eligible = await findEligibleSecondaryAssignees(story.zaloAccountId, story.departmentId);
+  const eligible = await findEligibleHandoverAssignees({
+    zaloAccountId: story.zaloAccountId,
+    nativeGroupId: story.conversation.nativeGroupId,
+    departmentId: story.departmentId,
+  });
   const recipient = eligible.find((user) => user.id === input.toUserId);
   if (!recipient) {
     throw new HandoverError('Chỉ có thể bàn giao cho phụ trách phụ 1 hoặc phụ 2 hợp lệ');
@@ -164,6 +182,7 @@ export async function respondArchiveHandover(input: {
           departmentId: true,
           assignedUserId: true,
           businessStatus: true,
+          conversation: { select: { nativeGroupId: true } },
         },
       },
     },
@@ -237,11 +256,13 @@ export async function respondArchiveHandover(input: {
     await invalidateRequest(request.id);
     throw new HandoverError('Hồ sơ đã đóng nên không thể nhận bàn giao', 409);
   }
-  const eligible = await findEligibleSecondaryAssignees(
-    request.story.zaloAccountId,
-    request.story.departmentId,
-  );
-  if (!eligible.some((user) => user.id === input.actor.id)) {
+  const eligible = await findEligibleHandoverAssignees({
+    zaloAccountId: request.story.zaloAccountId,
+    nativeGroupId: request.story.conversation.nativeGroupId,
+    departmentId: request.story.departmentId,
+  });
+  const recipientAccess = eligible.find((user) => user.id === input.actor.id);
+  if (!recipientAccess) {
     await invalidateRequest(request.id);
     throw new HandoverError('Bạn không còn là người phụ trách phụ hợp lệ', 409);
   }
@@ -270,6 +291,8 @@ export async function respondArchiveHandover(input: {
       },
       data: {
         assignedUserId: request.toUserId,
+        handlingZaloAccountId: recipientAccess.handlingZaloAccountId,
+        departmentId: recipientAccess.departmentId || request.story.departmentId,
         assignmentOrigin: 'handover',
       },
     });
@@ -389,6 +412,7 @@ export async function assignArchiveStoryDirectly(input: {
       assignedUserId: true,
       departmentId: true,
       businessStatus: true,
+      conversation: { select: { nativeGroupId: true } },
     },
   });
   if (!story) throw new HandoverError('Không tìm thấy hồ sơ', 404);
@@ -407,12 +431,18 @@ export async function assignArchiveStoryDirectly(input: {
       id: input.toUserId,
       orgId: input.actor.orgId,
       isActive: true,
-      departmentMember: { departmentId: story.departmentId },
+      ...(story.conversation.nativeGroupId ? {} : { departmentMember: { departmentId: story.departmentId } }),
     },
     select: { id: true, fullName: true },
   });
   if (!target) throw new HandoverError('Người xử lý mới phải là nhân viên đang hoạt động trong phòng');
-  if (!(await hasZaloHandlingAccess({
+  const sharedCandidates = await findEligibleHandoverAssignees({
+    zaloAccountId: story.zaloAccountId,
+    nativeGroupId: story.conversation.nativeGroupId,
+    departmentId: story.departmentId,
+  });
+  const targetAccess = sharedCandidates.find((candidate) => candidate.id === target.id);
+  if (!targetAccess && !(await hasZaloHandlingAccess({
     orgId: input.actor.orgId,
     zaloAccountId: story.zaloAccountId,
     userId: target.id,
@@ -444,6 +474,8 @@ export async function assignArchiveStoryDirectly(input: {
       },
       data: {
         assignedUserId: target.id,
+        handlingZaloAccountId: targetAccess?.handlingZaloAccountId || story.zaloAccountId,
+        departmentId: targetAccess?.departmentId || story.departmentId,
         assignmentOrigin: 'manager_override',
       },
     });
@@ -536,6 +568,80 @@ export async function canManagerOverrideAssignment(
     select: { path: true },
   });
   return Boolean(target?.path.startsWith(membership.department.path));
+}
+
+async function findEligibleHandoverAssignees(input: {
+  zaloAccountId: string;
+  nativeGroupId: string | null;
+  departmentId: string | null;
+  excludeUserId?: string | null;
+}) {
+  if (!input.nativeGroupId) {
+    const currentAccount = await findEligibleSecondaryAssignees(
+      input.zaloAccountId,
+      input.departmentId,
+      input.excludeUserId,
+    );
+    return currentAccount.map((user) => ({
+      ...user,
+      handlingZaloAccountId: input.zaloAccountId,
+      handlingZaloAccountName: null as string | null,
+      departmentId: input.departmentId,
+      sharedGroupAccess: false,
+    }));
+  }
+
+  const memberships = await prisma.nativeZaloGroupAccount.findMany({
+    where: { nativeGroupId: input.nativeGroupId, membershipStatus: 'active' },
+    select: {
+      zaloAccountId: true,
+      zaloAccount: { select: { displayName: true, status: true, departmentId: true } },
+    },
+  });
+  const accountIds = memberships.map((membership) => membership.zaloAccountId);
+  if (!accountIds.length) return [];
+  const accountById = new Map(memberships.map((membership) => [membership.zaloAccountId, membership.zaloAccount]));
+  const access = await prisma.zaloAccountAccess.findMany({
+    where: {
+      zaloAccountId: { in: accountIds },
+      OR: [
+        { assignmentRole: 'primary' },
+        { assignmentRole: { startsWith: 'secondary_' } },
+      ],
+      permission: { in: ['chat', 'admin'] },
+      user: { isActive: true },
+    },
+    select: {
+      zaloAccountId: true,
+      assignmentRole: true,
+      user: { select: { id: true, fullName: true } },
+    },
+  });
+  const sorted = access
+    .filter((item) => item.user.id !== input.excludeUserId)
+    .filter((item) => item.assignmentRole === 'primary' || /^secondary_[1-9]\d*$/.test(item.assignmentRole || ''))
+    .sort((a, b) => {
+      const accountA = accountById.get(a.zaloAccountId);
+      const accountB = accountById.get(b.zaloAccountId);
+      const connectedRank = Number(accountB?.status === 'connected') - Number(accountA?.status === 'connected');
+      return connectedRank
+        || assignmentRoleRank(a.assignmentRole) - assignmentRoleRank(b.assignmentRole)
+        || a.user.fullName.localeCompare(b.user.fullName, 'vi');
+    });
+  const byUser = new Map<string, (typeof sorted)[number]>();
+  for (const item of sorted) if (!byUser.has(item.user.id)) byUser.set(item.user.id, item);
+  return [...byUser.values()].map((item) => {
+    const account = accountById.get(item.zaloAccountId);
+    return {
+      id: item.user.id,
+      fullName: item.user.fullName,
+      assignmentRole: item.assignmentRole!,
+      handlingZaloAccountId: item.zaloAccountId,
+      handlingZaloAccountName: account?.displayName || null,
+      departmentId: account?.departmentId || null,
+      sharedGroupAccess: item.zaloAccountId !== input.zaloAccountId,
+    };
+  });
 }
 
 async function findEligibleSecondaryAssignees(

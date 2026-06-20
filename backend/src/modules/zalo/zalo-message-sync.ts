@@ -31,7 +31,7 @@ async function syncGroupMessages(api: any, accountId: string): Promise<number> {
   // Get most recently active group conversations
   const groupConvs = await prisma.conversation.findMany({
     where: { zaloAccountId: accountId, threadType: 'group' },
-    select: { id: true, externalThreadId: true },
+    select: { id: true, externalThreadId: true, nativeGroupId: true },
     take: MAX_GROUPS_PER_SYNC,
     orderBy: { lastMessageAt: 'desc' },
   });
@@ -40,6 +40,11 @@ async function syncGroupMessages(api: any, accountId: string): Promise<number> {
 
   for (const conv of groupConvs) {
     try {
+      let groupInfo: any = null;
+      if (!conv.nativeGroupId && conv.externalThreadId) {
+        const detail = await api.getGroupInfo(conv.externalThreadId);
+        groupInfo = detail?.gridInfoMap?.[conv.externalThreadId] || null;
+      }
       const history = await api.getGroupChatHistory(conv.externalThreadId, MESSAGES_PER_GROUP);
       const messages = history?.groupMsgs || history?.data?.groupMsgs || [];
 
@@ -78,6 +83,12 @@ async function syncGroupMessages(api: any, accountId: string): Promise<number> {
           isSelf: msg.isSelf || false,
           threadId: conv.externalThreadId!,
           threadType: 'group',
+          groupName: groupInfo?.name || undefined,
+          groupAvatarUrl: groupInfo?.avt || groupInfo?.fullAvt || undefined,
+          groupMembersCount: typeof groupInfo?.totalMember === 'number' ? groupInfo.totalMember : undefined,
+          groupGlobalId: String(groupInfo?.globalId || '') || undefined,
+          groupDescription: groupInfo?.desc || undefined,
+          groupType: typeof groupInfo?.type === 'number' ? groupInfo.type : undefined,
           attachments: [],
           quote: msg.data?.quote,
           albumKey: album.albumKey,

@@ -16,73 +16,77 @@ model Organization {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  teams                     Team[]
-  users                     User[]
-  zaloAccounts              ZaloAccount[]
-  contacts                  Contact[]
-  conversations             Conversation[]
-  appointments              Appointment[]
-  activityLogs              ActivityLog[]
-  dailyStats                DailyMessageStat[]
-  settings                  AppSetting[]
-  duplicateGroups           DuplicateGroup[]
-  savedReports              SavedReport[]
-  integrations              Integration[]
-  automationRules           AutomationRule[]
-  messageTemplates          MessageTemplate[]
-  aiConfig                  AiConfig?
-  aiSuggestions             AiSuggestion[]
-  pinnedConversations       PinnedConversation[]
-  groupPolls                GroupPoll[]
-  friendshipAttempts        FriendshipAttempt[]
-  friends                   Friend[]
-  statuses                  Status[]
-  parentCandidates          ParentCandidate[]
-  notes                     Note[]
-  zaloLabels                ZaloLabel[]
-  crmTags                   CrmTag[]
-  crmTagGroups              CrmTagGroup[]
+  teams                         Team[]
+  users                         User[]
+  zaloAccounts                  ZaloAccount[]
+  contacts                      Contact[]
+  conversations                 Conversation[]
+  appointments                  Appointment[]
+  activityLogs                  ActivityLog[]
+  dailyStats                    DailyMessageStat[]
+  settings                      AppSetting[]
+  duplicateGroups               DuplicateGroup[]
+  savedReports                  SavedReport[]
+  integrations                  Integration[]
+  automationRules               AutomationRule[]
+  messageTemplates              MessageTemplate[]
+  aiConfig                      AiConfig?
+  aiSuggestions                 AiSuggestion[]
+  pinnedConversations           PinnedConversation[]
+  groupPolls                    GroupPoll[]
+  friendshipAttempts            FriendshipAttempt[]
+  friends                       Friend[]
+  statuses                      Status[]
+  parentCandidates              ParentCandidate[]
+  notes                         Note[]
+  zaloLabels                    ZaloLabel[]
+  crmTags                       CrmTag[]
+  crmTagGroups                  CrmTagGroup[]
   // Phase 6 — Lead Scoring Engine relations
-  scoringConfig             ScoringConfig?
-  scoreSignalRules          ScoreSignalRule[]
-  stageTransitionRules      StageTransitionRule[]
-  stuckThresholds           StuckThreshold[]
-  nbaTemplates              NbaTemplate[]
+  scoringConfig                 ScoringConfig?
+  scoreSignalRules              ScoreSignalRule[]
+  stageTransitionRules          StageTransitionRule[]
+  stuckThresholds               StuckThreshold[]
+  nbaTemplates                  NbaTemplate[]
   // Phase 6+ — Inbox Triage Filter relations
-  accountFolders            AccountFolder[]
-  savedFilterPresets        SavedFilterPreset[]
+  accountFolders                AccountFolder[]
+  savedFilterPresets            SavedFilterPreset[]
   // Phase 7 — Automation framework (Block / Sequence / Trigger / Broadcast / Campaign / Task)
-  blocks                    Block[]
-  blockFolders              BlockFolder[]
-  automationSequences       AutomationSequence[]
-  automationTriggers        AutomationTrigger[]
-  automationBroadcasts      AutomationBroadcast[]
-  automationCampaigns       AutomationCampaign[]
-  automationTasks           AutomationTask[]
+  blocks                        Block[]
+  blockFolders                  BlockFolder[]
+  automationSequences           AutomationSequence[]
+  automationTriggers            AutomationTrigger[]
+  automationBroadcasts          AutomationBroadcast[]
+  automationCampaigns           AutomationCampaign[]
+  automationTasks               AutomationTask[]
   // RBAC Phase Phân Quyền 2026-05-21
-  departments               Department[]
-  permissionGroups          PermissionGroup[]
+  departments                   Department[]
+  permissionGroups              PermissionGroup[]
   // Phase ZaloAccounts redesign 2026-05-22 — status log uptime
-  zaloAccountStatusLog      ZaloAccountStatusLog[]
+  zaloAccountStatusLog          ZaloAccountStatusLog[]
   // Phase metrics layer 2026-05-22 — phone search log
-  phoneSearchEvents         PhoneSearchEvent[]
+  phoneSearchEvents             PhoneSearchEvent[]
   // Phase Privacy v2 2026-05-23 — nick chuyên dùng GỬI system notification cho cả org.
   // Admin pick bất kỳ nick connected. FK SET NULL khi nick bị xóa.
-  systemNotifyZaloAccountId String?                  @map("system_notify_zalo_account_id")
-  systemNotifyNick          ZaloAccount?             @relation("OrgSystemNotify", fields: [systemNotifyZaloAccountId], references: [id], onDelete: SetNull)
+  systemNotifyZaloAccountId     String?                            @map("system_notify_zalo_account_id")
+  systemNotifyNick              ZaloAccount?                       @relation("OrgSystemNotify", fields: [systemNotifyZaloAccountId], references: [id], onDelete: SetNull)
   // Phase FB — Facebook Lead Ingestion
-  facebookPageConnections   FacebookPageConnection[]
-  facebookFormMappings      FacebookFormMapping[]
-  archiveDestinations       ArchiveDestination[]
-  archiveStories            ArchiveStory[]
-  archiveNotifications      ArchiveNotification[]
-  notificationReads         NotificationRead[]
-  archiveTransferRequests   ArchiveAssignmentTransferRequest[]
-  archiveAssignmentHistory  ArchiveAssignmentHistory[]
-  archiveStatusDefinitions  ArchiveStatusDefinition[]
-  archiveStatusReasons      ArchiveStatusReason[]
-  archiveStatusTransitions  ArchiveStatusTransition[]
+  facebookPageConnections       FacebookPageConnection[]
+  facebookFormMappings          FacebookFormMapping[]
+  archiveDestinations           ArchiveDestination[]
+  archiveStories                ArchiveStory[]
+  archiveNotifications          ArchiveNotification[]
+  notificationReads             NotificationRead[]
+  archiveTransferRequests       ArchiveAssignmentTransferRequest[]
+  archiveAssignmentHistory      ArchiveAssignmentHistory[]
+  archiveStatusDefinitions      ArchiveStatusDefinition[]
+  archiveStatusReasons          ArchiveStatusReason[]
+  archiveStatusTransitions      ArchiveStatusTransition[]
   zaloAccountPrimaryDelegations ZaloAccountPrimaryDelegation[]
+  nativeZaloGroups              NativeZaloGroup[]
+  nativeZaloMessages            NativeZaloMessage[]
+  customerProfiles              CustomerProfile[]
+  zaloSubjectWorkAssignments    ZaloSubjectWorkAssignment[]
 
   @@map("organizations")
 }
@@ -130,55 +134,56 @@ model User {
   createdAt                    DateTime             @default(now()) @map("created_at")
   updatedAt                    DateTime             @updatedAt @map("updated_at")
 
-  org                       Organization                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  team                      Team?                        @relation(fields: [teamId], references: [id])
-  zaloAccounts              ZaloAccount[]
-  zaloAccess                ZaloAccountAccess[]
-  assignedContacts          Contact[]                    @relation("AssignedContacts")
-  appointments              Appointment[]
-  statusChangedAppointments Appointment[]                @relation("AppointmentStatusChanger")
-  repliedMessages           Message[]                    @relation("RepliedMessages")
-  activityLogs              ActivityLog[]
-  messageTemplates          MessageTemplate[]
-  authoredNotes             Note[]                       @relation("NoteAuthor")
-  noteReactions             NoteReaction[]
-  preferences               UserPreference[]
+  org                              Organization                       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  team                             Team?                              @relation(fields: [teamId], references: [id])
+  zaloAccounts                     ZaloAccount[]
+  zaloAccess                       ZaloAccountAccess[]
+  assignedContacts                 Contact[]                          @relation("AssignedContacts")
+  appointments                     Appointment[]
+  statusChangedAppointments        Appointment[]                      @relation("AppointmentStatusChanger")
+  repliedMessages                  Message[]                          @relation("RepliedMessages")
+  activityLogs                     ActivityLog[]
+  messageTemplates                 MessageTemplate[]
+  authoredNotes                    Note[]                             @relation("NoteAuthor")
+  noteReactions                    NoteReaction[]
+  preferences                      UserPreference[]
   // Phase 6+ — Inbox Triage Filter (per-user)
-  accountFolders            AccountFolder[]
-  savedFilterPresets        SavedFilterPreset[]
+  accountFolders                   AccountFolder[]
+  savedFilterPresets               SavedFilterPreset[]
   // Phase 7 — Automation framework (createdBy backrefs)
-  createdBlocks             Block[]                      @relation("BlockCreatedBy")
-  createdBlockFolders       BlockFolder[]                @relation("BlockFolderCreatedBy")
-  ownedBlockFolders         BlockFolder[]                @relation("BlockFolderOwnerUser")
-  createdSequences          AutomationSequence[]         @relation("SequenceCreatedBy")
-  createdTriggers           AutomationTrigger[]          @relation("TriggerCreatedBy")
-  createdBroadcasts         AutomationBroadcast[]        @relation("BroadcastCreatedBy")
+  createdBlocks                    Block[]                            @relation("BlockCreatedBy")
+  createdBlockFolders              BlockFolder[]                      @relation("BlockFolderCreatedBy")
+  ownedBlockFolders                BlockFolder[]                      @relation("BlockFolderOwnerUser")
+  createdSequences                 AutomationSequence[]               @relation("SequenceCreatedBy")
+  createdTriggers                  AutomationTrigger[]                @relation("TriggerCreatedBy")
+  createdBroadcasts                AutomationBroadcast[]              @relation("BroadcastCreatedBy")
   // Phase metrics layer 2026-05-22 — phone search by user
-  phoneSearchEvents         PhoneSearchEvent[]
+  phoneSearchEvents                PhoneSearchEvent[]
   // Phase FB — Facebook Lead Ingestion
-  customerListAssignments   CustomerListSaleAssignment[]
-  createdArchiveStories     ArchiveStory[]               @relation("ArchiveStoryCreatedBy")
-  assignedArchiveStories    ArchiveStory[]               @relation("ArchiveStoryAssignedTo")
-  completedArchiveStories   ArchiveStory[]               @relation("ArchiveStoryCompletedBy")
-  archiveStatusChanges      ArchiveStatusHistory[]
-  archiveNotifications      ArchiveNotification[]
-  archiveNotificationsAcknowledged ArchiveNotification[] @relation("ArchiveNotificationAcknowledgedBy")
-  notificationReads         NotificationRead[]
-  archiveDuplicateConfirms  ArchiveMessage[]             @relation("ArchiveMessageDuplicateConfirmedBy")
-  archiveMessagesAdded      ArchiveMessage[]             @relation("ArchiveMessageAddedBy")
-  archiveTransfersFrom      ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferFrom")
-  archiveTransfersTo        ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferTo")
-  archiveTransfersRequested ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferRequestedBy")
-  archiveTransfersResponded ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferRespondedBy")
-  archiveAssignmentsFrom    ArchiveAssignmentHistory[]    @relation("ArchiveAssignmentFrom")
-  archiveAssignmentsTo      ArchiveAssignmentHistory[]    @relation("ArchiveAssignmentTo")
-  archiveAssignmentsChanged ArchiveAssignmentHistory[]    @relation("ArchiveAssignmentChangedBy")
-  createdArchiveStatusReasons ArchiveStatusReason[]        @relation("ArchiveStatusReasonCreatedBy")
-  createdArchiveStatuses    ArchiveStatusDefinition[]      @relation("ArchiveStatusCreatedBy")
-  zaloPrimaryDelegationsBase      ZaloAccountPrimaryDelegation[] @relation("ZaloPrimaryDelegationBase")
-  zaloPrimaryDelegationsDelegate  ZaloAccountPrimaryDelegation[] @relation("ZaloPrimaryDelegationDelegate")
-  zaloPrimaryDelegationsCreated   ZaloAccountPrimaryDelegation[] @relation("ZaloPrimaryDelegationCreatedBy")
-  zaloPrimaryDelegationsCancelled ZaloAccountPrimaryDelegation[] @relation("ZaloPrimaryDelegationCancelledBy")
+  customerListAssignments          CustomerListSaleAssignment[]
+  createdArchiveStories            ArchiveStory[]                     @relation("ArchiveStoryCreatedBy")
+  assignedArchiveStories           ArchiveStory[]                     @relation("ArchiveStoryAssignedTo")
+  completedArchiveStories          ArchiveStory[]                     @relation("ArchiveStoryCompletedBy")
+  archiveStatusChanges             ArchiveStatusHistory[]
+  archiveNotifications             ArchiveNotification[]
+  archiveNotificationsAcknowledged ArchiveNotification[]              @relation("ArchiveNotificationAcknowledgedBy")
+  notificationReads                NotificationRead[]
+  archiveDuplicateConfirms         ArchiveMessage[]                   @relation("ArchiveMessageDuplicateConfirmedBy")
+  archiveMessagesAdded             ArchiveMessage[]                   @relation("ArchiveMessageAddedBy")
+  archiveTransfersFrom             ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferFrom")
+  archiveTransfersTo               ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferTo")
+  archiveTransfersRequested        ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferRequestedBy")
+  archiveTransfersResponded        ArchiveAssignmentTransferRequest[] @relation("ArchiveTransferRespondedBy")
+  archiveAssignmentsFrom           ArchiveAssignmentHistory[]         @relation("ArchiveAssignmentFrom")
+  archiveAssignmentsTo             ArchiveAssignmentHistory[]         @relation("ArchiveAssignmentTo")
+  archiveAssignmentsChanged        ArchiveAssignmentHistory[]         @relation("ArchiveAssignmentChangedBy")
+  createdArchiveStatusReasons      ArchiveStatusReason[]              @relation("ArchiveStatusReasonCreatedBy")
+  createdArchiveStatuses           ArchiveStatusDefinition[]          @relation("ArchiveStatusCreatedBy")
+  zaloPrimaryDelegationsBase       ZaloAccountPrimaryDelegation[]     @relation("ZaloPrimaryDelegationBase")
+  zaloPrimaryDelegationsDelegate   ZaloAccountPrimaryDelegation[]     @relation("ZaloPrimaryDelegationDelegate")
+  zaloPrimaryDelegationsCreated    ZaloAccountPrimaryDelegation[]     @relation("ZaloPrimaryDelegationCreatedBy")
+  zaloPrimaryDelegationsCancelled  ZaloAccountPrimaryDelegation[]     @relation("ZaloPrimaryDelegationCancelledBy")
+  zaloSubjectWorkAssignments       ZaloSubjectWorkAssignment[]        @relation("ZaloSubjectWorkAssignedUser")
 
   @@map("users")
 }
@@ -208,7 +213,7 @@ model ZaloAccount {
 
   org                Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
   owner              User                  @relation(fields: [ownerUserId], references: [id])
-  department         Department?            @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  department         Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   access             ZaloAccountAccess[]
   conversations      Conversation[]
   dailyStats         DailyMessageStat[]
@@ -237,11 +242,13 @@ model ZaloAccount {
   // Phase metrics layer 2026-05-22 — phone search log per nick
   phoneSearchEvents       PhoneSearchEvent[]
   // Phase Privacy v2 2026-05-23 — reverse relations
-  internalContactForUsers User[]                 @relation("UserInternalContact")
-  systemNotifyForOrgs     Organization[]         @relation("OrgSystemNotify")
+  internalContactForUsers User[]                         @relation("UserInternalContact")
+  systemNotifyForOrgs     Organization[]                 @relation("OrgSystemNotify")
   archiveDestination      ArchiveDestination?
   archiveStories          ArchiveStory[]
+  handlingArchiveStories  ArchiveStory[]                 @relation("ArchiveHandlingZaloAccount")
   primaryDelegations      ZaloAccountPrimaryDelegation[]
+  nativeGroupMemberships  NativeZaloGroupAccount[]
 
   @@index([orgId, deletedAt])
   @@index([departmentId, deletedAt])
@@ -281,16 +288,16 @@ model ZaloAccountStatusLog {
 
 // ACL: which users can access which Zalo accounts
 model ZaloAccountAccess {
-  id            String   @id @default(uuid())
-  zaloAccountId String   @map("zalo_account_id")
-  userId        String   @map("user_id")
-  permission    String   @default("read") // read, chat, admin
-  assignmentRole String? @map("assignment_role") // primary, secondary_1, secondary_2, ... secondary_n
-  grantSource    String?  @map("grant_source") // null/manual | primary_delegation
-  grantSourceId  String?  @map("grant_source_id")
-  grantExpiresAt DateTime? @map("grant_expires_at")
-  grantPreviousPermission String? @map("grant_previous_permission")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id                      String    @id @default(uuid())
+  zaloAccountId           String    @map("zalo_account_id")
+  userId                  String    @map("user_id")
+  permission              String    @default("read") // read, chat, admin
+  assignmentRole          String?   @map("assignment_role") // primary, secondary_1, secondary_2, ... secondary_n
+  grantSource             String?   @map("grant_source") // null/manual | primary_delegation
+  grantSourceId           String?   @map("grant_source_id")
+  grantExpiresAt          DateTime? @map("grant_expires_at")
+  grantPreviousPermission String?   @map("grant_previous_permission")
+  createdAt               DateTime  @default(now()) @map("created_at")
 
   zaloAccount ZaloAccount @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -425,20 +432,24 @@ model Contact {
   totalOutbound     Int @default(0) @map("total_outbound")
   totalAppointments Int @default(0) @map("total_appointments")
 
-  org               Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  assignedUser      User?               @relation("AssignedContacts", fields: [assignedUserId], references: [id])
-  mergedIntoContact Contact?            @relation("ContactMerge", fields: [mergedInto], references: [id])
-  mergedFrom        Contact[]           @relation("ContactMerge")
-  parent            Contact?            @relation("ContactFather", fields: [parentContactId], references: [id], onDelete: SetNull)
-  children          Contact[]           @relation("ContactFather")
-  statusRef         Status?             @relation(fields: [statusId], references: [id], onDelete: SetNull)
-  conversations     Conversation[]
-  appointments      Appointment[]
-  attempts          FriendshipAttempt[]
-  friends           Friend[]
-  contactNotes      Note[]
+  org                    Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignedUser           User?                       @relation("AssignedContacts", fields: [assignedUserId], references: [id])
+  mergedIntoContact      Contact?                    @relation("ContactMerge", fields: [mergedInto], references: [id])
+  mergedFrom             Contact[]                   @relation("ContactMerge")
+  parent                 Contact?                    @relation("ContactFather", fields: [parentContactId], references: [id], onDelete: SetNull)
+  children               Contact[]                   @relation("ContactFather")
+  statusRef              Status?                     @relation(fields: [statusId], references: [id], onDelete: SetNull)
+  conversations          Conversation[]
+  appointments           Appointment[]
+  attempts               FriendshipAttempt[]
+  friends                Friend[]
+  contactNotes           Note[]
   // Phase 7 — Automation framework
-  automationTasks   AutomationTask[]
+  automationTasks        AutomationTask[]
+  customerProfileLink    CustomerProfileZaloUser?
+  nativeGroupMemberships NativeZaloGroupMember[]
+  zaloUserCrmTags        ZaloUserCrmTag[]
+  zaloWorkAssignments    ZaloSubjectWorkAssignment[]
 
   // Per-Contact counters (cache from Friend rows; updated by friend-aggregate hooks)
   acceptedNicksCount Int @default(0) @map("accepted_nicks_count")
@@ -539,28 +550,30 @@ model Status {
 
 // A chat thread between a Zalo account and a contact (or group)
 model Conversation {
-  id                String    @id @default(uuid())
-  orgId             String    @map("org_id")
-  zaloAccountId     String    @map("zalo_account_id")
-  contactId         String?   @map("contact_id")
-  threadType        String    @default("user") // user, group
-  externalThreadId  String?   @map("external_thread_id")
+  id                                  String    @id @default(uuid())
+  orgId                               String    @map("org_id")
+  zaloAccountId                       String    @map("zalo_account_id")
+  contactId                           String?   @map("contact_id")
+  threadType                          String    @default("user") // user, group
+  externalThreadId                    String?   @map("external_thread_id")
+  nativeGroupId                       String?   @map("native_group_id")
   // Group-specific (chỉ set khi threadType=group; resolve qua getGroupInfo từ zca-js)
-  groupName         String?   @map("group_name")
-  groupAvatarUrl    String?   @map("group_avatar_url")
-  groupMembersCount Int?      @map("group_members_count")
-  lastMessageAt     DateTime? @map("last_message_at")
-  unreadCount       Int       @default(0) @map("unread_count")
-  isReplied         Boolean   @default(true) @map("is_replied")
-  tab               String    @default("main") @map("tab") // main, other
-  requiresConfirmationDefault Boolean? @map("requires_confirmation_default")
-  requiresConfirmationUpdatedByUserId String? @map("requires_confirmation_updated_by_user_id")
-  requiresConfirmationUpdatedAt DateTime? @map("requires_confirmation_updated_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
+  groupName                           String?   @map("group_name")
+  groupAvatarUrl                      String?   @map("group_avatar_url")
+  groupMembersCount                   Int?      @map("group_members_count")
+  lastMessageAt                       DateTime? @map("last_message_at")
+  unreadCount                         Int       @default(0) @map("unread_count")
+  isReplied                           Boolean   @default(true) @map("is_replied")
+  tab                                 String    @default("main") @map("tab") // main, other
+  requiresConfirmationDefault         Boolean?  @map("requires_confirmation_default")
+  requiresConfirmationUpdatedByUserId String?   @map("requires_confirmation_updated_by_user_id")
+  requiresConfirmationUpdatedAt       DateTime? @map("requires_confirmation_updated_at")
+  createdAt                           DateTime  @default(now()) @map("created_at")
 
   org            Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   zaloAccount    ZaloAccount          @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
   contact        Contact?             @relation(fields: [contactId], references: [id])
+  nativeGroup    NativeZaloGroup?     @relation(fields: [nativeGroupId], references: [id], onDelete: SetNull)
   messages       Message[]
   aiSuggestions  AiSuggestion[]
   pins           PinnedConversation[]
@@ -568,6 +581,7 @@ model Conversation {
 
   @@unique([zaloAccountId, externalThreadId])
   @@index([orgId, requiresConfirmationDefault])
+  @@index([nativeGroupId, lastMessageAt])
   @@index([orgId, zaloAccountId, isReplied, lastMessageAt])
   @@index([orgId, zaloAccountId, lastMessageAt])
   @@index([orgId, tab, lastMessageAt])
@@ -582,59 +596,273 @@ model Conversation {
 
 // Individual message within a conversation
 model Message {
-  id              String    @id @default(uuid())
-  conversationId  String    @map("conversation_id")
-  zaloMsgId       String?   @map("zalo_msg_id")
+  id                  String    @id @default(uuid())
+  conversationId      String    @map("conversation_id")
+  nativeZaloMessageId String?   @map("native_zalo_message_id")
+  zaloMsgId           String?   @map("zalo_msg_id")
   // Numeric Snowflake từ Zalo server — primary sort key (match 100% Zalo Web).
   // sentAt giữ làm display + fallback cho CRM-sent chưa echo. KHÔNG dùng sentAt làm
   // primary order vì self-listen events đôi khi thiếu `ts` → Date.now() fallback lệch ~30s.
-  zaloMsgIdNum    BigInt?   @map("zalo_msg_id_num")
-  senderType      String    @map("sender_type") // self, contact
-  senderUid       String?   @map("sender_uid")
-  senderName      String?   @map("sender_name")
-  content         String?
-  contentType     String    @default("text") @map("content_type") // text, image, file, sticker, voice, video, link
-  attachments     Json      @default("[]")
-  quote           Json?     @map("quote")
-  albumKey        String?   @map("album_key") // Zalo group_layout_id — identifies multi-image albums
-  albumIndex      Int?      @map("album_index") // 0-based position within album
-  albumTotal      Int?      @map("album_total") // total items in album
-  isDeleted       Boolean   @default(false) @map("is_deleted")
-  deletedAt       DateTime? @map("deleted_at")
+  zaloMsgIdNum        BigInt?   @map("zalo_msg_id_num")
+  senderType          String    @map("sender_type") // self, contact
+  senderUid           String?   @map("sender_uid")
+  senderName          String?   @map("sender_name")
+  content             String?
+  contentType         String    @default("text") @map("content_type") // text, image, file, sticker, voice, video, link
+  attachments         Json      @default("[]")
+  quote               Json?     @map("quote")
+  albumKey            String?   @map("album_key") // Zalo group_layout_id — identifies multi-image albums
+  albumIndex          Int?      @map("album_index") // 0-based position within album
+  albumTotal          Int?      @map("album_total") // total items in album
+  isDeleted           Boolean   @default(false) @map("is_deleted")
+  deletedAt           DateTime? @map("deleted_at")
   // Edit message audit (2026-05-21) — zca-js không support edit thật, edit chỉ áp dụng trên CRM.
   // Khi sửa: lưu content cũ vào originalContent (lần đầu) + set editedAt = now.
-  originalContent String?   @map("original_content")
-  editedAt        DateTime? @map("edited_at")
+  originalContent     String?   @map("original_content")
+  editedAt            DateTime? @map("edited_at")
   // Zalo client message id (2026-05-21) — KHÁC zaloMsgId (server snowflake). Cần cho api.undo
   // (Zalo expect cả msgId + cliMsgId). Tin cũ trước migration chưa có column này → null.
-  zaloCliMsgId    String?   @map("zalo_cli_msg_id")
-  sentAt          DateTime  @map("sent_at")
+  zaloCliMsgId        String?   @map("zalo_cli_msg_id")
+  sentAt              DateTime  @map("sent_at")
   // Read receipts (2026-05-21 Wave 1+2 — wire `delivered_messages` + `seen_messages`
   // SDK events). Cả 2 chỉ set cho tin OUTGOING (senderType='self'); KH-side luôn null.
   //   deliveredAt — Zalo server confirm device KH đã nhận packet (1 tick xám)
   //   seenAt      — KH mở conversation đọc tin (2 tick xanh)
-  deliveredAt     DateTime? @map("delivered_at")
-  seenAt          DateTime? @map("seen_at")
-  repliedByUserId String?   @map("replied_by_user_id")
+  deliveredAt         DateTime? @map("delivered_at")
+  seenAt              DateTime? @map("seen_at")
+  repliedByUserId     String?   @map("replied_by_user_id")
   // Phase metrics layer 2026-05-22: phân biệt nguồn gửi cho automation rate-limit + dashboard.
   // 'user' = sale gửi qua CRM UI HOẶC sync về từ Zalo native (default — backward compat)
   // 'automation' = bot/sequence/broadcast/NBA suggest gửi qua engine
   // 'system' = CRM internal (reminder card, system notice — chưa dùng, reserved)
-  sentVia         String    @default("user") @map("sent_via")
-  createdAt       DateTime  @default(now()) @map("created_at")
+  sentVia             String    @default("user") @map("sent_via")
+  createdAt           DateTime  @default(now()) @map("created_at")
 
-  conversation     Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  repliedBy        User?             @relation("RepliedMessages", fields: [repliedByUserId], references: [id])
-  reactions        MessageReaction[]
-  archiveSnapshots ArchiveMessage[]
+  conversation      Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  nativeZaloMessage NativeZaloMessage? @relation(fields: [nativeZaloMessageId], references: [id], onDelete: SetNull)
+  repliedBy         User?              @relation("RepliedMessages", fields: [repliedByUserId], references: [id])
+  reactions         MessageReaction[]
+  archiveSnapshots  ArchiveMessage[]
 
   @@unique([conversationId, zaloMsgId])
   @@index([conversationId, albumKey])
+  @@index([nativeZaloMessageId])
   // Composite index cho sort theo Zalo Snowflake — primary order khi list messages.
   @@index([conversationId, zaloMsgIdNum(sort: Desc)])
   // Phase metrics 2026-05-22: aggregate query per nick per day per category
   @@index([conversationId, sentAt, senderType, sentVia])
   @@map("messages")
+}
+
+// Canonical Zalo group identity. Zalo returns a viewer-scoped groupId for API
+// calls and a shared globalId for the same native group across CRM accounts.
+model NativeZaloGroup {
+  id          String   @id @default(uuid())
+  orgId       String   @map("org_id")
+  globalId    String   @map("global_id")
+  name        String?
+  avatarUrl   String?  @map("avatar_url")
+  description String?
+  groupType   Int?     @map("group_type")
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org             Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  accounts        NativeZaloGroupAccount[]
+  conversations   Conversation[]
+  messages        NativeZaloMessage[]
+  members         NativeZaloGroupMember[]
+  customerLink    CustomerProfileZaloGroup?
+  crmTags         NativeZaloGroupCrmTag[]
+  workAssignments ZaloSubjectWorkAssignment[]
+
+  @@unique([orgId, globalId])
+  @@index([orgId, lastSeenAt])
+  @@map("native_zalo_groups")
+}
+
+model NativeZaloGroupAccount {
+  id                   String    @id @default(uuid())
+  nativeGroupId        String    @map("native_group_id")
+  zaloAccountId        String    @map("zalo_account_id")
+  accountScopedGroupId String    @map("account_scoped_group_id")
+  membershipStatus     String    @default("active") @map("membership_status")
+  firstSeenAt          DateTime  @default(now()) @map("first_seen_at")
+  lastConfirmedAt      DateTime  @default(now()) @map("last_confirmed_at")
+  leftAt               DateTime? @map("left_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  nativeGroup NativeZaloGroup @relation(fields: [nativeGroupId], references: [id], onDelete: Cascade)
+  zaloAccount ZaloAccount     @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([zaloAccountId, accountScopedGroupId])
+  @@unique([nativeGroupId, zaloAccountId])
+  @@index([nativeGroupId, membershipStatus])
+  @@map("native_zalo_group_accounts")
+}
+
+model NativeZaloMessage {
+  id             String   @id @default(uuid())
+  orgId          String   @map("org_id")
+  nativeGroupId  String   @map("native_group_id")
+  zaloMsgId      String   @map("zalo_msg_id")
+  senderGlobalId String?  @map("sender_global_id")
+  sentAt         DateTime @map("sent_at")
+  firstSeenAt    DateTime @default(now()) @map("first_seen_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  org              Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  nativeGroup      NativeZaloGroup  @relation(fields: [nativeGroupId], references: [id], onDelete: Cascade)
+  observedMessages Message[]
+  archiveSnapshots ArchiveMessage[]
+
+  @@unique([nativeGroupId, zaloMsgId])
+  @@index([orgId, sentAt])
+  @@map("native_zalo_messages")
+}
+
+model NativeZaloGroupMember {
+  id               String    @id @default(uuid())
+  nativeGroupId    String    @map("native_group_id")
+  contactId        String?   @map("contact_id")
+  zaloGlobalId     String    @map("zalo_global_id")
+  membershipStatus String    @default("active") @map("membership_status")
+  firstSeenAt      DateTime  @default(now()) @map("first_seen_at")
+  lastConfirmedAt  DateTime  @default(now()) @map("last_confirmed_at")
+  leftAt           DateTime? @map("left_at")
+
+  nativeGroup NativeZaloGroup @relation(fields: [nativeGroupId], references: [id], onDelete: Cascade)
+  contact     Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@unique([nativeGroupId, zaloGlobalId])
+  @@index([contactId, membershipStatus])
+  @@map("native_zalo_group_members")
+}
+
+// Customer records imported from Google Sheets. Contact remains the canonical
+// Zalo person identity; customer ownership is represented by explicit links.
+model CustomerProfile {
+  id          String    @id @default(uuid())
+  orgId       String    @map("org_id")
+  externalKey String    @map("external_key")
+  code        String?
+  name        String
+  phone       String?
+  email       String?
+  source      String    @default("google_sheet")
+  metadata    Json      @default("{}")
+  syncedAt    DateTime? @map("synced_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  org            Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  zaloGroups     CustomerProfileZaloGroup[]
+  zaloUsers      CustomerProfileZaloUser[]
+  archiveStories ArchiveStory[]
+
+  @@unique([orgId, externalKey])
+  @@index([orgId, name])
+  @@index([orgId, code])
+  @@map("customer_profiles")
+}
+
+model CustomerProfileZaloGroup {
+  id                String   @id @default(uuid())
+  orgId             String   @map("org_id")
+  customerProfileId String   @map("customer_profile_id")
+  nativeGroupId     String   @unique @map("native_group_id")
+  linkedByUserId    String   @map("linked_by_user_id")
+  source            String   @default("manual_assignment")
+  linkedAt          DateTime @default(now()) @map("linked_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  nativeGroup     NativeZaloGroup @relation(fields: [nativeGroupId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, customerProfileId])
+  @@map("customer_profile_zalo_groups")
+}
+
+model CustomerProfileZaloUser {
+  id                String   @id @default(uuid())
+  orgId             String   @map("org_id")
+  customerProfileId String   @map("customer_profile_id")
+  contactId         String   @unique @map("contact_id")
+  linkedByUserId    String   @map("linked_by_user_id")
+  source            String   @default("manual_assignment")
+  linkedAt          DateTime @default(now()) @map("linked_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  contact         Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, customerProfileId])
+  @@map("customer_profile_zalo_users")
+}
+
+model ZaloUserCrmTag {
+  id               String   @id @default(uuid())
+  orgId            String   @map("org_id")
+  contactId        String   @map("contact_id")
+  crmTagId         String   @map("crm_tag_id")
+  assignedByUserId String   @map("assigned_by_user_id")
+  assignedAt       DateTime @default(now()) @map("assigned_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  crmTag  CrmTag  @relation(fields: [crmTagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, crmTagId])
+  @@index([orgId, crmTagId])
+  @@map("zalo_user_crm_tags")
+}
+
+model NativeZaloGroupCrmTag {
+  id               String   @id @default(uuid())
+  orgId            String   @map("org_id")
+  nativeGroupId    String   @map("native_group_id")
+  crmTagId         String   @map("crm_tag_id")
+  assignedByUserId String   @map("assigned_by_user_id")
+  assignedAt       DateTime @default(now()) @map("assigned_at")
+
+  nativeGroup NativeZaloGroup @relation(fields: [nativeGroupId], references: [id], onDelete: Cascade)
+  crmTag      CrmTag          @relation(fields: [crmTagId], references: [id], onDelete: Cascade)
+
+  @@unique([nativeGroupId, crmTagId])
+  @@index([orgId, crmTagId])
+  @@map("native_zalo_group_crm_tags")
+}
+
+model ZaloSubjectWorkAssignment {
+  id               String    @id @default(uuid())
+  orgId            String    @map("org_id")
+  subjectType      String    @map("subject_type")
+  contactId        String?   @map("contact_id")
+  nativeGroupId    String?   @map("native_group_id")
+  assignedUserId   String    @map("assigned_user_id")
+  crmTagId         String?   @map("crm_tag_id")
+  role             String    @default("collaborator")
+  assignedByUserId String    @map("assigned_by_user_id")
+  validFrom        DateTime? @map("valid_from")
+  validUntil       DateTime? @map("valid_until")
+  closedAt         DateTime? @map("closed_at")
+  closeReason      String?   @map("close_reason")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  org          Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  contact      Contact?         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  nativeGroup  NativeZaloGroup? @relation(fields: [nativeGroupId], references: [id], onDelete: Cascade)
+  assignedUser User             @relation("ZaloSubjectWorkAssignedUser", fields: [assignedUserId], references: [id], onDelete: Cascade)
+  crmTag       CrmTag?          @relation(fields: [crmTagId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, assignedUserId, closedAt])
+  @@index([contactId, closedAt])
+  @@index([nativeGroupId, closedAt])
+  @@index([crmTagId, assignedUserId, closedAt])
+  @@map("zalo_subject_work_assignments")
 }
 
 // DB-first archive for selected Zalo messages. Google Drive/Sheets are backup targets.
@@ -659,65 +887,73 @@ model ArchiveDestination {
 }
 
 model ArchiveStory {
-  id                  String    @id @default(uuid())
-  orgId               String    @map("org_id")
-  destinationId       String?   @map("destination_id")
-  zaloAccountId       String    @map("zalo_account_id")
-  conversationId      String    @map("conversation_id")
-  createdByUserId     String    @map("created_by_user_id")
-  assignedUserId      String?   @map("assigned_user_id")
-  departmentId        String?   @map("department_id")
-  completedByUserId   String?   @map("completed_by_user_id")
-  conversationName    String    @map("conversation_name")
-  conversationType    String    @map("conversation_type")
-  contactPhone        String?   @map("contact_phone")
-  zaloAccountDisplayNameSnapshot String? @map("zalo_account_display_name_snapshot")
-  zaloAccountUidSnapshot         String? @map("zalo_account_uid_snapshot")
+  id                             String    @id @default(uuid())
+  orgId                          String    @map("org_id")
+  destinationId                  String?   @map("destination_id")
+  zaloAccountId                  String    @map("zalo_account_id")
+  handlingZaloAccountId          String?   @map("handling_zalo_account_id")
+  conversationId                 String    @map("conversation_id")
+  customerProfileId              String?   @map("customer_profile_id")
+  customerProfileCodeSnapshot    String?   @map("customer_profile_code_snapshot")
+  customerProfileNameSnapshot    String?   @map("customer_profile_name_snapshot")
+  customerContextType            String?   @map("customer_context_type")
+  customerContextSubjectId       String?   @map("customer_context_subject_id")
+  createdByUserId                String    @map("created_by_user_id")
+  assignedUserId                 String?   @map("assigned_user_id")
+  departmentId                   String?   @map("department_id")
+  completedByUserId              String?   @map("completed_by_user_id")
+  conversationName               String    @map("conversation_name")
+  conversationType               String    @map("conversation_type")
+  contactPhone                   String?   @map("contact_phone")
+  zaloAccountDisplayNameSnapshot String?   @map("zalo_account_display_name_snapshot")
+  zaloAccountUidSnapshot         String?   @map("zalo_account_uid_snapshot")
   zaloAccountDeletedAt           DateTime? @map("zalo_account_deleted_at")
-  title               String?
-  orderCode           String?   @map("order_code")
-  priority            String    @default("normal")
-  requiresConfirmation Boolean? @map("requires_confirmation")
-  extraNote           String?   @map("extra_note")
-  customerId          String?   @map("customer_id")
-  customerNameSnapshot String?  @map("customer_name_snapshot")
-  recordType          String    @default("order") @map("record_type")
-  conversationContent String    @map("conversation_content")
-  receivedAt          DateTime? @map("received_at")
-  assignmentOrigin    String    @default("initial") @map("assignment_origin")
-  recalledContent     String?   @map("recalled_content")
-  resultContent       String?   @map("result_content")
-  businessStatus      String    @default("pending") @map("business_status")
-  statusDefinitionId  String?   @map("status_definition_id")
-  statusReasonId      String?   @map("status_reason_id")
-  statusReasonCodeSnapshot String? @map("status_reason_code_snapshot")
-  statusReasonNameSnapshot String? @map("status_reason_name_snapshot")
-  backupStatus        String    @default("pending") @map("backup_status")
-  backupAttempts      Int       @default(0) @map("backup_attempts")
-  backupError         String?   @map("backup_error")
-  nextBackupAt        DateTime? @map("next_backup_at")
-  googleViewRow       Int?      @map("google_view_row")
-  completedAt         DateTime? @map("completed_at")
-  lastReminderDate    DateTime? @map("last_reminder_date")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  title                          String?
+  orderCode                      String?   @map("order_code")
+  priority                       String    @default("normal")
+  requiresConfirmation           Boolean?  @map("requires_confirmation")
+  extraNote                      String?   @map("extra_note")
+  customerId                     String?   @map("customer_id")
+  customerNameSnapshot           String?   @map("customer_name_snapshot")
+  recordType                     String    @default("order") @map("record_type")
+  conversationContent            String    @map("conversation_content")
+  receivedAt                     DateTime? @map("received_at")
+  assignmentOrigin               String    @default("initial") @map("assignment_origin")
+  recalledContent                String?   @map("recalled_content")
+  resultContent                  String?   @map("result_content")
+  businessStatus                 String    @default("pending") @map("business_status")
+  statusDefinitionId             String?   @map("status_definition_id")
+  statusReasonId                 String?   @map("status_reason_id")
+  statusReasonCodeSnapshot       String?   @map("status_reason_code_snapshot")
+  statusReasonNameSnapshot       String?   @map("status_reason_name_snapshot")
+  backupStatus                   String    @default("pending") @map("backup_status")
+  backupAttempts                 Int       @default(0) @map("backup_attempts")
+  backupError                    String?   @map("backup_error")
+  nextBackupAt                   DateTime? @map("next_backup_at")
+  googleViewRow                  Int?      @map("google_view_row")
+  completedAt                    DateTime? @map("completed_at")
+  lastReminderDate               DateTime? @map("last_reminder_date")
+  createdAt                      DateTime  @default(now()) @map("created_at")
+  updatedAt                      DateTime  @updatedAt @map("updated_at")
 
-  org           Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  destination   ArchiveDestination?    @relation(fields: [destinationId], references: [id], onDelete: SetNull)
-  zaloAccount   ZaloAccount            @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
-  conversation  Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  createdBy     User                   @relation("ArchiveStoryCreatedBy", fields: [createdByUserId], references: [id])
-  assignedUser  User?                  @relation("ArchiveStoryAssignedTo", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  department    Department?            @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  completedBy   User?                  @relation("ArchiveStoryCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
-  statusDefinition ArchiveStatusDefinition? @relation(fields: [statusDefinitionId], references: [id], onDelete: Restrict)
-  statusReason     ArchiveStatusReason?     @relation("ArchiveStoryStatusReason", fields: [statusReasonId], references: [id], onDelete: SetNull)
-  messages      ArchiveMessage[]
-  recallEvents  ArchiveRecallEvent[]
-  statusHistory ArchiveStatusHistory[]
-  notifications ArchiveNotification[]
-  transferRequests ArchiveAssignmentTransferRequest[]
-  assignmentHistory ArchiveAssignmentHistory[]
+  org                 Organization                       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  destination         ArchiveDestination?                @relation(fields: [destinationId], references: [id], onDelete: SetNull)
+  zaloAccount         ZaloAccount                        @relation(fields: [zaloAccountId], references: [id], onDelete: Cascade)
+  handlingZaloAccount ZaloAccount?                       @relation("ArchiveHandlingZaloAccount", fields: [handlingZaloAccountId], references: [id], onDelete: SetNull)
+  conversation        Conversation                       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customerProfile     CustomerProfile?                   @relation(fields: [customerProfileId], references: [id], onDelete: SetNull)
+  createdBy           User                               @relation("ArchiveStoryCreatedBy", fields: [createdByUserId], references: [id])
+  assignedUser        User?                              @relation("ArchiveStoryAssignedTo", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  department          Department?                        @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  completedBy         User?                              @relation("ArchiveStoryCompletedBy", fields: [completedByUserId], references: [id], onDelete: SetNull)
+  statusDefinition    ArchiveStatusDefinition?           @relation(fields: [statusDefinitionId], references: [id], onDelete: Restrict)
+  statusReason        ArchiveStatusReason?               @relation("ArchiveStoryStatusReason", fields: [statusReasonId], references: [id], onDelete: SetNull)
+  messages            ArchiveMessage[]
+  recallEvents        ArchiveRecallEvent[]
+  statusHistory       ArchiveStatusHistory[]
+  notifications       ArchiveNotification[]
+  transferRequests    ArchiveAssignmentTransferRequest[]
+  assignmentHistory   ArchiveAssignmentHistory[]
 
   @@index([orgId, businessStatus, createdAt])
   @@index([orgId, statusDefinitionId, createdAt])
@@ -727,6 +963,8 @@ model ArchiveStory {
   @@index([orgId, priority, updatedAt])
   @@index([orgId, requiresConfirmation, updatedAt])
   @@index([orgId, customerId])
+  @@index([orgId, customerProfileId, createdAt])
+  @@index([handlingZaloAccountId, businessStatus, createdAt])
   @@index([orgId, assignmentOrigin, updatedAt])
   @@index([assignedUserId, businessStatus, createdAt])
   @@index([departmentId, businessStatus, createdAt])
@@ -736,37 +974,41 @@ model ArchiveStory {
 }
 
 model ArchiveMessage {
-  id                  String    @id @default(uuid())
-  storyId             String    @map("story_id")
-  sourceMessageId     String    @map("source_message_id")
-  senderType          String    @map("sender_type")
-  senderUid           String?   @map("sender_uid")
-  senderName          String?   @map("sender_name")
-  contentType         String    @map("content_type")
-  contentSnapshot     String?   @map("content_snapshot")
-  quoteSnapshot       Json?     @map("quote_snapshot")
-  attachmentsSnapshot Json      @default("[]") @map("attachments_snapshot")
-  sentAt              DateTime  @map("sent_at")
-  recalledAt          DateTime? @map("recalled_at")
-  recalledContent     String?   @map("recalled_content")
+  id                         String    @id @default(uuid())
+  storyId                    String    @map("story_id")
+  sourceMessageId            String    @map("source_message_id")
+  nativeZaloMessageId        String?   @map("native_zalo_message_id")
+  senderType                 String    @map("sender_type")
+  senderUid                  String?   @map("sender_uid")
+  senderName                 String?   @map("sender_name")
+  contentType                String    @map("content_type")
+  contentSnapshot            String?   @map("content_snapshot")
+  quoteSnapshot              Json?     @map("quote_snapshot")
+  attachmentsSnapshot        Json      @default("[]") @map("attachments_snapshot")
+  sentAt                     DateTime  @map("sent_at")
+  recalledAt                 DateTime? @map("recalled_at")
+  recalledContent            String?   @map("recalled_content")
   duplicateConfirmedByUserId String?   @map("duplicate_confirmed_by_user_id")
   duplicateConfirmedAt       DateTime? @map("duplicate_confirmed_at")
-  addedByUserId       String?   @map("added_by_user_id")
-  addedAt             DateTime  @default(now()) @map("added_at")
-  addedSource         String    @default("manual") @map("added_source")
-  googleRawRow        Int?      @map("google_raw_row")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  addedByUserId              String?   @map("added_by_user_id")
+  addedAt                    DateTime  @default(now()) @map("added_at")
+  addedSource                String    @default("manual") @map("added_source")
+  googleRawRow               Int?      @map("google_raw_row")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
 
-  story         ArchiveStory         @relation(fields: [storyId], references: [id], onDelete: Cascade)
-  sourceMessage Message              @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
-  duplicateConfirmedBy User?         @relation("ArchiveMessageDuplicateConfirmedBy", fields: [duplicateConfirmedByUserId], references: [id], onDelete: SetNull)
-  addedBy      User?                  @relation("ArchiveMessageAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
-  media         ArchiveMedia[]
-  recallEvents  ArchiveRecallEvent[]
+  story                ArchiveStory         @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  sourceMessage        Message              @relation(fields: [sourceMessageId], references: [id], onDelete: Restrict)
+  nativeZaloMessage    NativeZaloMessage?   @relation(fields: [nativeZaloMessageId], references: [id], onDelete: SetNull)
+  duplicateConfirmedBy User?                @relation("ArchiveMessageDuplicateConfirmedBy", fields: [duplicateConfirmedByUserId], references: [id], onDelete: SetNull)
+  addedBy              User?                @relation("ArchiveMessageAddedBy", fields: [addedByUserId], references: [id], onDelete: SetNull)
+  media                ArchiveMedia[]
+  recallEvents         ArchiveRecallEvent[]
 
   @@unique([storyId, sourceMessageId])
+  @@unique([storyId, nativeZaloMessageId])
   @@index([sourceMessageId])
+  @@index([nativeZaloMessageId])
   @@index([addedByUserId, addedAt])
   @@map("archive_messages")
 }
@@ -829,7 +1071,7 @@ model ArchiveStatusHistory {
   changedBy            User                     @relation(fields: [changedById], references: [id])
   fromStatusDefinition ArchiveStatusDefinition? @relation("ArchiveStatusHistoryFromDefinition", fields: [fromStatusDefinitionId], references: [id], onDelete: SetNull)
   toStatusDefinition   ArchiveStatusDefinition? @relation("ArchiveStatusHistoryToDefinition", fields: [toStatusDefinitionId], references: [id], onDelete: SetNull)
-  reason               ArchiveStatusReason?      @relation("ArchiveStatusHistoryReason", fields: [reasonId], references: [id], onDelete: SetNull)
+  reason               ArchiveStatusReason?     @relation("ArchiveStatusHistoryReason", fields: [reasonId], references: [id], onDelete: SetNull)
 
   @@index([storyId, createdAt])
   @@index([fromStatusDefinitionId])
@@ -863,40 +1105,40 @@ model ArchiveStatusReason {
 }
 
 model ArchiveStatusDefinition {
-  id                 String   @id @default(uuid())
-  orgId              String   @map("org_id")
-  departmentId       String?  @map("department_id")
-  code               String
-  name               String
-  description        String?
-  behaviorGroup      String   @map("behavior_group")
-  colorToken         String   @default("primary") @map("color_token")
-  icon               String   @default("mdi-progress-clock")
-  displayOrder       Int      @default(0) @map("display_order")
-  isDefault          Boolean  @default(false) @map("is_default")
-  showOnKanban       Boolean  @default(true) @map("show_on_kanban")
-  showCountOnOverview Boolean @default(false) @map("show_count_on_overview")
-  countsAsWorkload   Boolean  @default(false) @map("counts_as_workload")
-  allowMessageAppend Boolean  @default(true) @map("allow_message_append")
-  autoSyncReplies    Boolean  @default(true) @map("auto_sync_replies")
-  requireNote        Boolean  @default(false) @map("require_note")
-  requireResult      Boolean  @default(false) @map("require_result")
-  requireReason      Boolean  @default(false) @map("require_reason")
-  isSystem           Boolean  @default(false) @map("is_system")
-  isActive           Boolean  @default(true) @map("is_active")
-  createdByUserId    String?  @map("created_by_user_id")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(uuid())
+  orgId               String   @map("org_id")
+  departmentId        String?  @map("department_id")
+  code                String
+  name                String
+  description         String?
+  behaviorGroup       String   @map("behavior_group")
+  colorToken          String   @default("primary") @map("color_token")
+  icon                String   @default("mdi-progress-clock")
+  displayOrder        Int      @default(0) @map("display_order")
+  isDefault           Boolean  @default(false) @map("is_default")
+  showOnKanban        Boolean  @default(true) @map("show_on_kanban")
+  showCountOnOverview Boolean  @default(false) @map("show_count_on_overview")
+  countsAsWorkload    Boolean  @default(false) @map("counts_as_workload")
+  allowMessageAppend  Boolean  @default(true) @map("allow_message_append")
+  autoSyncReplies     Boolean  @default(true) @map("auto_sync_replies")
+  requireNote         Boolean  @default(false) @map("require_note")
+  requireResult       Boolean  @default(false) @map("require_result")
+  requireReason       Boolean  @default(false) @map("require_reason")
+  isSystem            Boolean  @default(false) @map("is_system")
+  isActive            Boolean  @default(true) @map("is_active")
+  createdByUserId     String?  @map("created_by_user_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  department      Department?  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  createdBy       User?        @relation("ArchiveStatusCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  org             Organization              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department      Department?               @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdBy       User?                     @relation("ArchiveStatusCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   stories         ArchiveStory[]
   reasons         ArchiveStatusReason[]
   transitionsFrom ArchiveStatusTransition[] @relation("ArchiveStatusTransitionFrom")
   transitionsTo   ArchiveStatusTransition[] @relation("ArchiveStatusTransitionTo")
-  historyFrom     ArchiveStatusHistory[] @relation("ArchiveStatusHistoryFromDefinition")
-  historyTo       ArchiveStatusHistory[] @relation("ArchiveStatusHistoryToDefinition")
+  historyFrom     ArchiveStatusHistory[]    @relation("ArchiveStatusHistoryFromDefinition")
+  historyTo       ArchiveStatusHistory[]    @relation("ArchiveStatusHistoryToDefinition")
 
   @@unique([orgId, departmentId, code])
   @@index([orgId, departmentId, isActive, displayOrder])
@@ -941,12 +1183,12 @@ model ArchiveAssignmentTransferRequest {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  story       ArchiveStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
-  fromUser    User         @relation("ArchiveTransferFrom", fields: [fromUserId], references: [id])
-  toUser      User         @relation("ArchiveTransferTo", fields: [toUserId], references: [id])
-  requestedBy User         @relation("ArchiveTransferRequestedBy", fields: [requestedByUserId], references: [id])
-  respondedBy User?        @relation("ArchiveTransferRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
+  org               Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  story             ArchiveStory               @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  fromUser          User                       @relation("ArchiveTransferFrom", fields: [fromUserId], references: [id])
+  toUser            User                       @relation("ArchiveTransferTo", fields: [toUserId], references: [id])
+  requestedBy       User                       @relation("ArchiveTransferRequestedBy", fields: [requestedByUserId], references: [id])
+  respondedBy       User?                      @relation("ArchiveTransferRespondedBy", fields: [respondedByUserId], references: [id], onDelete: SetNull)
   assignmentHistory ArchiveAssignmentHistory[]
 
   @@index([storyId, status])
@@ -967,11 +1209,11 @@ model ArchiveAssignmentHistory {
   reason            String?
   createdAt         DateTime @default(now()) @map("created_at")
 
-  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  story           ArchiveStory @relation(fields: [storyId], references: [id], onDelete: Cascade)
-  fromUser        User?        @relation("ArchiveAssignmentFrom", fields: [fromUserId], references: [id], onDelete: SetNull)
-  toUser          User         @relation("ArchiveAssignmentTo", fields: [toUserId], references: [id])
-  changedBy       User         @relation("ArchiveAssignmentChangedBy", fields: [changedByUserId], references: [id])
+  org             Organization                      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  story           ArchiveStory                      @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  fromUser        User?                             @relation("ArchiveAssignmentFrom", fields: [fromUserId], references: [id], onDelete: SetNull)
+  toUser          User                              @relation("ArchiveAssignmentTo", fields: [toUserId], references: [id])
+  changedBy       User                              @relation("ArchiveAssignmentChangedBy", fields: [changedByUserId], references: [id])
   transferRequest ArchiveAssignmentTransferRequest? @relation(fields: [transferRequestId], references: [id], onDelete: SetNull)
 
   @@index([storyId, createdAt])
@@ -980,26 +1222,26 @@ model ArchiveAssignmentHistory {
 }
 
 model ArchiveNotification {
-  id                    String    @id @default(uuid())
-  orgId                 String    @map("org_id")
-  userId                String?   @map("user_id")
-  storyId               String?   @map("story_id")
-  type                  String
-  title                 String
-  detail                String
-  priority              String    @default("medium")
-  readAt                DateTime? @map("read_at")
-  seenAt                DateTime? @map("seen_at")
-  requiresAck           Boolean   @default(false) @map("requires_ack")
-  acknowledgedAt        DateTime? @map("acknowledged_at")
-  acknowledgedByUserId  String?   @map("acknowledged_by_user_id")
-  dedupeKey             String?   @unique @map("dedupe_key")
-  createdAt             DateTime  @default(now()) @map("created_at")
+  id                   String    @id @default(uuid())
+  orgId                String    @map("org_id")
+  userId               String?   @map("user_id")
+  storyId              String?   @map("story_id")
+  type                 String
+  title                String
+  detail               String
+  priority             String    @default("medium")
+  readAt               DateTime? @map("read_at")
+  seenAt               DateTime? @map("seen_at")
+  requiresAck          Boolean   @default(false) @map("requires_ack")
+  acknowledgedAt       DateTime? @map("acknowledged_at")
+  acknowledgedByUserId String?   @map("acknowledged_by_user_id")
+  dedupeKey            String?   @unique @map("dedupe_key")
+  createdAt            DateTime  @default(now()) @map("created_at")
 
   org            Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user           User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
   story          ArchiveStory? @relation(fields: [storyId], references: [id], onDelete: Cascade)
-  acknowledgedBy User?        @relation("ArchiveNotificationAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  acknowledgedBy User?         @relation("ArchiveNotificationAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
 
   @@index([orgId, userId, readAt, createdAt])
   @@index([orgId, userId, requiresAck, acknowledgedAt, createdAt])
@@ -1147,8 +1389,11 @@ model CrmTag {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  org   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  group CrmTagGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  org              Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  group            CrmTagGroup?                @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  zaloUserLinks    ZaloUserCrmTag[]
+  nativeGroupLinks NativeZaloGroupCrmTag[]
+  workAssignments  ZaloSubjectWorkAssignment[]
 
   @@unique([orgId, name])
   @@unique([sourceZaloLabelId]) // 1 Zalo label → 1 CrmTag mirror
@@ -2422,28 +2667,28 @@ model CustomerListEntry {
 // ════════════════════════════════════════════════════════════════════════
 
 model Department {
-  id           String    @id @default(uuid())
-  orgId        String    @map("org_id")
-  name         String
-  parentId     String?   @map("parent_id")
+  id                       String    @id @default(uuid())
+  orgId                    String    @map("org_id")
+  name                     String
+  parentId                 String?   @map("parent_id")
   // Materialized path "/<rootId>/<midId>/<thisId>/" — query subtree bằng LIKE.
   // Auto recompute bởi trigger Postgres recompute_department_path() khi insert/update parent_id.
-  path         String
-  depth        Int       @default(0) // 0 = root, max 4 (5 level total per anh chốt)
-  displayOrder Int       @default(0) @map("display_order")
-  defaultArchiveRecordType String @default("order") @map("default_archive_record_type")
-  archivedAt   DateTime? @map("archived_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
+  path                     String
+  depth                    Int       @default(0) // 0 = root, max 4 (5 level total per anh chốt)
+  displayOrder             Int       @default(0) @map("display_order")
+  defaultArchiveRecordType String    @default("order") @map("default_archive_record_type")
+  archivedAt               DateTime? @map("archived_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
 
-  org      Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  parent   Department?        @relation("DeptTree", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children Department[]       @relation("DeptTree")
-  members  DepartmentMember[]
-  archiveStories ArchiveStory[]
-  zaloAccounts ZaloAccount[]
+  org                      Organization                   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent                   Department?                    @relation("DeptTree", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children                 Department[]                   @relation("DeptTree")
+  members                  DepartmentMember[]
+  archiveStories           ArchiveStory[]
+  zaloAccounts             ZaloAccount[]
   archiveStatusDefinitions ArchiveStatusDefinition[]
-  zaloPrimaryDelegations ZaloAccountPrimaryDelegation[]
+  zaloPrimaryDelegations   ZaloAccountPrimaryDelegation[]
 
   @@index([orgId, path])
   @@index([parentId])

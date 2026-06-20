@@ -3,7 +3,12 @@
     <!-- Toolbar -->
     <div class="d-flex align-center pa-4 pb-2 gap-3">
       <h1 class="text-h5 mr-2">Nhóm Zalo</h1>
+      <v-btn-toggle v-model="viewMode" mandatory density="compact" color="primary" variant="outlined">
+        <v-btn value="shared" prepend-icon="mdi-account-multiple-check">Nhóm chung</v-btn>
+        <v-btn value="native" prepend-icon="mdi-cellphone-link">Theo nick</v-btn>
+      </v-btn-toggle>
       <v-select
+        v-if="viewMode === 'native'"
         v-model="selectedAccountId"
         :items="accounts"
         item-title="displayName"
@@ -27,6 +32,7 @@
         </template>
       </v-select>
       <v-btn
+        v-if="viewMode === 'native'"
         icon="mdi-refresh"
         variant="text"
         :loading="loading"
@@ -36,7 +42,7 @@
     </div>
 
     <!-- Two-panel layout -->
-    <div class="d-flex flex-1-1 overflow-hidden mx-4 mb-4 gap-3">
+    <div v-if="viewMode === 'native'" class="d-flex flex-1-1 overflow-hidden mx-4 mb-4 gap-3">
       <!-- Left: Group list -->
       <v-card variant="outlined" class="d-flex flex-column overflow-hidden" style="width: 280px; min-width: 240px">
         <GroupList
@@ -75,6 +81,8 @@
         />
       </v-card>
     </div>
+
+    <SharedGroupWorkspace v-else class="flex-1-1 overflow-hidden mx-4 mb-4" />
 
     <!-- Dialogs -->
     <GroupCreateDialog
@@ -142,6 +150,7 @@ import GroupCreateDialog from '@/components/groups/group-create-dialog.vue';
 import GroupSettingsDialog from '@/components/groups/group-settings-dialog.vue';
 import PollCreateDialog from '@/components/groups/poll-create-dialog.vue';
 import InviteLinkManager from '@/components/groups/invite-link-manager.vue';
+import SharedGroupWorkspace from '@/components/groups/shared-group-workspace.vue';
 
 const router = useRouter();
 
@@ -160,6 +169,7 @@ const {
 const { polls, createPoll, votePoll, lockPoll, sharePoll } = usePolls();
 
 const selectedGroupId = ref('');
+const viewMode = ref<'shared' | 'native'>('shared');
 const showCreateDialog = ref(false);
 const showSettingsDialog = ref(false);
 const showPollDialog = ref(false);

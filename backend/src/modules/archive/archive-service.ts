@@ -78,19 +78,26 @@ export async function preflightArchiveMessages(input: {
   const ids = uniqueMessageIds(input.messageIds);
   const messages = await prisma.message.findMany({
     where: { id: { in: ids }, conversationId: input.conversationId },
-    select: { id: true },
+    select: { id: true, nativeZaloMessageId: true },
   });
   if (messages.length !== ids.length) {
     throw new Error('One or more messages do not belong to this conversation');
   }
 
+  const nativeIds = messages
+    .map((message) => message.nativeZaloMessageId)
+    .filter((id): id is string => Boolean(id));
   const archived = await prisma.archiveMessage.findMany({
     where: {
-      sourceMessageId: { in: ids },
       story: { orgId: input.orgId },
+      OR: [
+        { sourceMessageId: { in: ids } },
+        ...(nativeIds.length ? [{ nativeZaloMessageId: { in: nativeIds } }] : []),
+      ],
     },
     select: {
       sourceMessageId: true,
+      nativeZaloMessageId: true,
       storyId: true,
       story: {
         select: {
@@ -106,22 +113,31 @@ export async function preflightArchiveMessages(input: {
 
   const targetDuplicates = new Set<string>();
   const conflicts = new Map<string, ArchiveConflict>();
-  for (const item of archived) {
-    if (input.targetStoryId && item.storyId === input.targetStoryId) {
-      targetDuplicates.add(item.sourceMessageId);
-      continue;
+  for (const message of messages) {
+    const matches = archived.filter((item) => (
+      item.sourceMessageId === message.id
+      || Boolean(message.nativeZaloMessageId && item.nativeZaloMessageId === message.nativeZaloMessageId)
+    ));
+    const seenStoryIds = new Set<string>();
+    for (const item of matches) {
+      if (seenStoryIds.has(item.storyId)) continue;
+      seenStoryIds.add(item.storyId);
+      if (input.targetStoryId && item.storyId === input.targetStoryId) {
+        targetDuplicates.add(message.id);
+        continue;
+      }
+      const conflict = conflicts.get(message.id) ?? {
+        messageId: message.id,
+        stories: [],
+      };
+      conflict.stories.push({
+        id: item.story.id,
+        title: item.story.title || item.story.conversationName,
+        businessStatus: item.story.businessStatus,
+        statusDefinition: item.story.statusDefinition,
+      });
+      conflicts.set(message.id, conflict);
     }
-    const conflict = conflicts.get(item.sourceMessageId) ?? {
-      messageId: item.sourceMessageId,
-      stories: [],
-    };
-    conflict.stories.push({
-      id: item.story.id,
-      title: item.story.title || item.story.conversationName,
-      businessStatus: item.story.businessStatus,
-      statusDefinition: item.story.statusDefinition,
-    });
-    conflicts.set(item.sourceMessageId, conflict);
   }
 
   return {
@@ -168,16 +184,36 @@ export async function createArchiveStory(input: CreateArchiveStoryInput) {
       })
     : null;
   const conversationName = getConversationName(conversation);
+  const customerContext = conversation.threadType === 'group'
+    ? conversation.nativeGroup?.customerLink?.customerProfile || null
+    : conversation.contact?.customerProfileLink?.customerProfile || null;
+  const customerContextSubjectId = conversation.threadType === 'group'
+    ? conversation.nativeGroupId
+    : conversation.contactId;
   const title = oneLine(input.title);
   const initialStatus = await resolveDefaultArchiveStatus(input.orgId, assignment.departmentId);
 
   const story = await prisma.$transaction(async (tx) => {
+    await assertNoConcurrentArchiveConflict(
+      tx,
+      input.orgId,
+      messages,
+      Boolean(input.allowCrossStoryDuplicates),
+    );
     const created = await tx.archiveStory.create({
       data: {
         orgId: input.orgId,
         destinationId: destination?.id || null,
         zaloAccountId: conversation.zaloAccountId,
+        handlingZaloAccountId: conversation.zaloAccountId,
         conversationId: conversation.id,
+        customerProfileId: customerContext?.id || null,
+        customerProfileCodeSnapshot: customerContext?.code || null,
+        customerProfileNameSnapshot: customerContext?.name || null,
+        customerContextType: customerContext
+          ? (conversation.threadType === 'group' ? 'group' : 'direct_user')
+          : null,
+        customerContextSubjectId: customerContext ? customerContextSubjectId : null,
         createdByUserId: input.userId,
         assignedUserId: assignment.assignedUserId,
         departmentId: assignment.departmentId,
@@ -387,6 +423,7 @@ async function snapshotMessages(
       data: {
         storyId: input.storyId,
         sourceMessageId: message.id,
+        nativeZaloMessageId: message.nativeZaloMessageId,
         senderType: message.senderType,
         senderUid: message.senderUid,
         senderName: message.senderName,
@@ -423,6 +460,51 @@ async function snapshotMessages(
 
 type SourceMessage = Awaited<ReturnType<typeof loadSourceMessages>>[number];
 
+async function assertNoConcurrentArchiveConflict(
+  tx: any,
+  orgId: string,
+  messages: SourceMessage[],
+  allowCrossStoryDuplicates: boolean,
+): Promise<void> {
+  const lockKeys = messages
+    .map((message) => message.nativeZaloMessageId ? `native:${message.nativeZaloMessageId}` : `source:${message.id}`)
+    .sort();
+  for (const key of lockKeys) {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+  }
+  if (allowCrossStoryDuplicates) return;
+
+  const nativeIds = messages
+    .map((message) => message.nativeZaloMessageId)
+    .filter((id): id is string => Boolean(id));
+  const existing = await tx.archiveMessage.findFirst({
+    where: {
+      story: { orgId },
+      OR: [
+        { sourceMessageId: { in: messages.map((message) => message.id) } },
+        ...(nativeIds.length ? [{ nativeZaloMessageId: { in: nativeIds } }] : []),
+      ],
+    },
+    include: {
+      story: { select: { id: true, title: true, conversationName: true, businessStatus: true, statusDefinition: true } },
+    },
+  });
+  if (!existing) return;
+  const selected = messages.find((message) => (
+    message.id === existing.sourceMessageId
+    || Boolean(message.nativeZaloMessageId && message.nativeZaloMessageId === existing.nativeZaloMessageId)
+  ));
+  throw new ArchiveConflictError([{
+    messageId: selected?.id || existing.sourceMessageId,
+    stories: [{
+      id: existing.story.id,
+      title: existing.story.title || existing.story.conversationName,
+      businessStatus: existing.story.businessStatus,
+      statusDefinition: existing.story.statusDefinition,
+    }],
+  }]);
+}
+
 async function loadSourceMessages(conversationId: string, ids: string[]) {
   const messages = await prisma.message.findMany({
     where: { id: { in: ids }, conversationId },
@@ -438,7 +520,16 @@ async function loadConversation(conversationId: string, orgId: string) {
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, orgId },
     include: {
-      contact: { select: { fullName: true, phone: true } },
+      contact: {
+        select: {
+          fullName: true,
+          phone: true,
+          customerProfileLink: { include: { customerProfile: true } },
+        },
+      },
+      nativeGroup: {
+        include: { customerLink: { include: { customerProfile: true } } },
+      },
       zaloAccount: {
         select: {
           id: true,
@@ -682,6 +773,8 @@ export const archiveStoryInclude = {
       deletedByUserId: true,
     },
   },
+  handlingZaloAccount: { select: { id: true, displayName: true, zaloUid: true, status: true } },
+  customerProfile: true,
   messages: {
     orderBy: { sentAt: 'asc' as const },
     include: {

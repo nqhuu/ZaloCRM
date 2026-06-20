@@ -194,6 +194,9 @@ interface ResolvedGroup {
   name: string;
   avatar: string;
   membersCount: number | null;
+  globalId: string;
+  description: string;
+  groupType: number | null;
 }
 
 // Fetch group display name + avatar + member count from the zca-js API
@@ -206,10 +209,13 @@ async function resolveGroupInfo(api: any, groupId: string): Promise<ResolvedGrou
       name: info?.name || '',
       avatar: info?.avt || info?.fullAvt || info?.avatar || '',
       membersCount: Array.isArray(members) ? members.length : (info?.totalMember || null),
+      globalId: String(info?.globalId || ''),
+      description: String(info?.desc || ''),
+      groupType: typeof info?.type === 'number' ? info.type : null,
     };
   } catch (err) {
     logger.warn(`[zalo] getGroupInfo failed for ${groupId}:`, err);
-    return { name: '', avatar: '', membersCount: null };
+    return { name: '', avatar: '', membersCount: null, globalId: '', description: '', groupType: null };
   }
 }
 
@@ -409,11 +415,17 @@ export function attachZaloListener(ctx: ListenerContext): void {
       let groupName: string | undefined;
       let groupAvatarUrl: string | undefined;
       let groupMembersCount: number | undefined;
+      let groupGlobalId: string | undefined;
+      let groupDescription: string | undefined;
+      let groupType: number | undefined;
       if (isGroup && message.threadId) {
         const groupInfo = await resolveGroupInfo(api, message.threadId);
         groupName = groupInfo.name || undefined;
         groupAvatarUrl = groupInfo.avatar || undefined;
         groupMembersCount = groupInfo.membersCount ?? undefined;
+        groupGlobalId = groupInfo.globalId || undefined;
+        groupDescription = groupInfo.description || undefined;
+        groupType = groupInfo.groupType ?? undefined;
       }
 
       const rawContent = message.data?.content;
@@ -444,6 +456,9 @@ export function attachZaloListener(ctx: ListenerContext): void {
         groupName,
         groupAvatarUrl,
         groupMembersCount,
+        groupGlobalId,
+        groupDescription,
+        groupType,
         attachments: [],
         quote: message.data?.quote,
         albumKey: album.albumKey,
@@ -604,11 +619,17 @@ export function attachZaloListener(ctx: ListenerContext): void {
         let groupName: string | undefined;
         let groupAvatarUrl: string | undefined;
         let groupMembersCount: number | undefined;
+        let groupGlobalId: string | undefined;
+        let groupDescription: string | undefined;
+        let groupType: number | undefined;
         if (threadType === 'group' && resolvedThreadId) {
           const groupInfo = await resolveGroupInfo(api, resolvedThreadId);
           groupName = groupInfo.name || undefined;
           groupAvatarUrl = groupInfo.avatar || undefined;
           groupMembersCount = groupInfo.membersCount ?? undefined;
+          groupGlobalId = groupInfo.globalId || undefined;
+          groupDescription = groupInfo.description || undefined;
+          groupType = groupInfo.groupType ?? undefined;
         }
 
         const rawContent = message.data?.content;
@@ -634,6 +655,9 @@ export function attachZaloListener(ctx: ListenerContext): void {
           groupName,
           groupAvatarUrl,
           groupMembersCount,
+          groupGlobalId,
+          groupDescription,
+          groupType,
           attachments: [],
           quote: message.data?.quote,
           albumKey: album.albumKey,
