@@ -2,7 +2,7 @@
   <section class="archive-workload-report" :class="{ collapsed }">
     <header class="archive-workload-head">
       <button type="button" class="archive-workload-title" @click="toggleCollapsed">
-        <span>Tồn đọng</span>
+        <span>Tồn</span>
         <strong>{{ summary?.totals.openCount ?? 0 }}</strong>
       </button>
       <div class="archive-workload-actions">

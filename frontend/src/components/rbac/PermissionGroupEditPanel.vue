@@ -327,6 +327,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   permission_group: 'Quản lý quyền',
   conversation: 'Hội thoại',
   contact: 'Khách hàng',
+  customer_source: 'Nguồn đồng bộ khách hàng',
   friend: 'Friends Zalo',
   customer_list: 'Tệp khách hàng',
   broadcast: 'Chiến dịch',

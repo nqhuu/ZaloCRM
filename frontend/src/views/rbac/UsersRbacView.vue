@@ -80,6 +80,7 @@
           <tr>
             <th class="th-num">#</th>
             <th class="th-name">Nhân viên</th>
+            <th class="th-code">Mã NV</th>
             <th class="th-email">Email</th>
             <th class="th-dept">Phòng ban</th>
             <th class="th-role">Chức vụ</th>
@@ -105,6 +106,10 @@
                 <div class="cell-name-main">{{ u.fullName || '(chưa đặt tên)' }}</div>
                 <div v-if="u.role === 'owner'" class="cell-name-sub owner-tag">👑 Chủ tổ chức</div>
               </div>
+            </td>
+            <td class="cell-code">
+              <span v-if="u.legacyEmployeeCode" class="at-chip chip-code">{{ u.legacyEmployeeCode }}</span>
+              <span v-else class="at-empty">—</span>
             </td>
             <td class="cell-email">{{ u.email }}</td>
             <td class="cell-dept">
@@ -175,6 +180,7 @@
         <v-card-text>
           <div class="create-user-grid">
             <v-text-field v-model="createForm.fullName" label="Họ tên *" />
+            <v-text-field v-model="createForm.legacyEmployeeCode" label="Mã nhân viên Sheet" placeholder="VD: DA01" />
             <v-text-field v-model="createForm.email" label="Email đăng nhập *" type="email" />
             <v-text-field v-model="createForm.password" label="Mật khẩu ban đầu *" type="password" />
             <v-select
@@ -254,6 +260,7 @@ const creatingUser = ref(false);
 const createError = ref('');
 const createForm = ref({
   fullName: '',
+  legacyEmployeeCode: '',
   email: '',
   password: '',
   role: 'member',
@@ -361,6 +368,7 @@ async function onChanged() {
 function openCreateUser() {
   createForm.value = {
     fullName: '',
+    legacyEmployeeCode: '',
     email: '',
     password: '',
     role: 'member',
@@ -387,6 +395,7 @@ async function createUser() {
   try {
     const { data: user } = await api.post('/users', {
       fullName: form.fullName.trim(),
+      legacyEmployeeCode: form.legacyEmployeeCode.trim() || null,
       email: form.email.trim(),
       password: form.password,
       role: form.role,
@@ -516,6 +525,7 @@ function avatarColor(name: string): string {
 }
 .th-num { width: 46px; text-align: center !important; }
 .th-name { min-width: 200px; }
+.th-code { min-width: 96px; }
 .th-email { min-width: 180px; }
 .th-dept { min-width: 140px; }
 .th-role { width: 140px; }
@@ -596,6 +606,12 @@ function avatarColor(name: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 260px;
+}
+.cell-code { white-space: nowrap; }
+.chip-code {
+  background: #eef3f8;
+  color: #1f4e79;
+  font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
 }
 
 /* Airtable chips */

@@ -22,6 +22,7 @@ export async function userRoutes(app: FastifyInstance) {
         id: true,
         email: true,
         fullName: true,
+        legacyEmployeeCode: true,
         role: true,
         isActive: true,
         teamId: true,
@@ -40,7 +41,7 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: 'Không có quyền' });
     }
 
-    const { email, fullName, password, role = 'member', teamId } = request.body as any;
+    const { email, fullName, password, role = 'member', teamId, legacyEmployeeCode } = request.body as any;
     if (!email || !fullName || !password) {
       return reply.status(400).send({ error: 'Email, họ tên, mật khẩu là bắt buộc' });
     }
@@ -60,6 +61,7 @@ export async function userRoutes(app: FastifyInstance) {
         orgId: currentUser.orgId,
         email,
         fullName,
+        legacyEmployeeCode: legacyEmployeeCode?.trim() || null,
         passwordHash,
         role,
         teamId: teamId || null,
@@ -68,6 +70,7 @@ export async function userRoutes(app: FastifyInstance) {
         id: true,
         email: true,
         fullName: true,
+        legacyEmployeeCode: true,
         role: true,
         isActive: true,
         createdAt: true,
@@ -87,7 +90,7 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: 'Không có quyền' });
     }
 
-    const { fullName, email, role, teamId, isActive } = request.body as any;
+    const { fullName, email, role, teamId, isActive, legacyEmployeeCode } = request.body as any;
 
     if (id === currentUser.id && role && role !== currentUser.role) {
       return reply.status(400).send({ error: 'Không thể thay đổi role của chính mình' });
@@ -96,6 +99,7 @@ export async function userRoutes(app: FastifyInstance) {
     const updateData: any = {};
     if (fullName !== undefined) updateData.fullName = fullName;
     if (email !== undefined) updateData.email = email;
+    if (legacyEmployeeCode !== undefined) updateData.legacyEmployeeCode = legacyEmployeeCode?.trim() || null;
     if (role !== undefined && currentUser.role === 'owner') updateData.role = role;
     if (teamId !== undefined) updateData.teamId = teamId || null;
     if (isActive !== undefined && currentUser.role === 'owner') updateData.isActive = isActive;
@@ -107,6 +111,7 @@ export async function userRoutes(app: FastifyInstance) {
         id: true,
         email: true,
         fullName: true,
+        legacyEmployeeCode: true,
         role: true,
         isActive: true,
         teamId: true,

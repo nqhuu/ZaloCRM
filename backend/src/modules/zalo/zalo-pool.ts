@@ -132,10 +132,15 @@ class ZaloAccountPool {
         const userInfo = await api.getUserInfo(ownId);
         const profiles = userInfo?.changed_profiles || {};
         const profile = profiles[ownId] || profiles[`${ownId}_0`];
-        if (profile?.avatar) {
+        if (profile) {
+          const profilePhone = String(profile.phoneNumber || profile.phone || '').trim();
           await prisma.zaloAccount.update({
             where: { id: accountId },
-            data: { avatarUrl: profile.avatar, displayName: profile.zaloName || profile.zalo_name || profile.displayName || instance.displayName },
+            data: {
+              ...(profile.avatar ? { avatarUrl: profile.avatar } : {}),
+              displayName: profile.zaloName || profile.zalo_name || profile.displayName || instance.displayName,
+              ...(profilePhone ? { phone: profilePhone } : {}),
+            },
           });
         }
       } catch {}
@@ -194,10 +199,15 @@ class ZaloAccountPool {
         const userInfo = await api.getUserInfo(ownId);
         const profiles = userInfo?.changed_profiles || {};
         const profile = profiles[ownId] || profiles[`${ownId}_0`];
-        if (profile?.avatar) {
+        if (profile) {
+          const profilePhone = String(profile.phoneNumber || profile.phone || '').trim();
           await prisma.zaloAccount.update({
             where: { id: accountId },
-            data: { avatarUrl: profile.avatar, displayName: profile.zaloName || profile.zalo_name || profile.displayName || instance.displayName },
+            data: {
+              ...(profile.avatar ? { avatarUrl: profile.avatar } : {}),
+              displayName: profile.zaloName || profile.zalo_name || profile.displayName || instance.displayName,
+              ...(profilePhone ? { phone: profilePhone } : {}),
+            },
           });
         }
       } catch {}
@@ -310,8 +320,14 @@ class ZaloAccountPool {
     try {
       let effectiveZaloUid = zaloUid;
       if (zaloUid !== null) {
+        // Soft-deleted connections must not keep the unique Zalo identity.
+        // Archive rows already retain their own UID snapshot.
+        await prisma.zaloAccount.updateMany({
+          where: { zaloUid, id: { not: accountId }, deletedAt: { not: null } },
+          data: { zaloUid: null },
+        });
         const uidOwner = await prisma.zaloAccount.findFirst({
-          where: { zaloUid, id: { not: accountId } },
+          where: { zaloUid, id: { not: accountId }, deletedAt: null },
           select: { id: true },
         });
         if (uidOwner) {

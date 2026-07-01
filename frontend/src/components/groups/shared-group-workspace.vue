@@ -117,7 +117,10 @@
         <div class="inline-form">
           <v-autocomplete
             v-model="customerProfileId"
+            v-model:search="customerProfileSearch"
             :items="customerProfiles"
+            :loading="loadingCustomerProfiles"
+            :no-filter="true"
             item-title="displayName"
             item-value="id"
             label="Hồ sơ khách hàng"
@@ -125,6 +128,7 @@
             variant="outlined"
             hide-details
             clearable
+            @update:search="scheduleCustomerProfileSearch"
           />
           <v-btn color="primary" :disabled="!customerProfileId" :loading="savingCustomer" @click="linkCustomer">
             Gắn hồ sơ
@@ -276,17 +280,20 @@ const loading = ref(false);
 const syncing = ref(false);
 const syncingSheet = ref(false);
 const savingCustomer = ref(false);
+const loadingCustomerProfiles = ref(false);
 const sheetDialog = ref(false);
 const customerProfiles = ref<CustomerProfile[]>([]);
 const crmTags = ref<CrmTag[]>([]);
 const users = ref<RbacUser[]>([]);
 const customerProfileId = ref<string | null>(null);
+const customerProfileSearch = ref('');
 const tagId = ref<string | null>(null);
 const filters = reactive({ q: '', customerLinkStatus: '', sharedOnly: false });
 const assignmentForm = reactive({ userId: '', role: 'collaborator', crmTagId: null as string | null });
 const sheetForm = reactive({ spreadsheetId: '', sheetName: 'KhachHang', range: 'A:Z' });
 const snack = reactive({ show: false, message: '', color: 'success' });
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let customerProfileSearchTimer: ReturnType<typeof setTimeout> | null = null;
 
 const customerFilters = [
   { title: 'Tất cả', value: '' },
@@ -320,6 +327,11 @@ function errorMessage(error: any): string {
 function scheduleLoad() {
   if (searchTimer) clearTimeout(searchTimer);
   searchTimer = setTimeout(loadGroups, 250);
+}
+
+function scheduleCustomerProfileSearch(value?: string) {
+  if (customerProfileSearchTimer) clearTimeout(customerProfileSearchTimer);
+  customerProfileSearchTimer = setTimeout(() => loadCustomerProfiles(value ?? customerProfileSearch.value), 250);
 }
 
 async function loadGroups() {
@@ -357,6 +369,37 @@ async function loadMetadata() {
     crmTags.value = (requests[1].value.data.tags || []).filter((item: CrmTag) => !item.managedBy);
   }
   if (requests[2].status === 'fulfilled') users.value = requests[2].value.data.users || [];
+}
+
+function toCustomerProfileOption(item: any): CustomerProfile {
+  return {
+    ...item,
+    displayName: item.code ? `${item.name} · ${item.code}` : item.name,
+  };
+}
+
+function mergeCustomerProfileOptions(items: CustomerProfile[]) {
+  const map = new Map<string, CustomerProfile>();
+  customerProfiles.value.forEach((item) => map.set(item.id, item));
+  items.forEach((item) => map.set(item.id, item));
+  customerProfiles.value = [...map.values()];
+}
+
+async function loadCustomerProfiles(q = '') {
+  loadingCustomerProfiles.value = true;
+  try {
+    const { data } = await api.get('/customer-profiles', { params: { q: q?.trim() || undefined } });
+    const options = (data.profiles || []).map(toCustomerProfileOption);
+    if (customerProfileId.value && !options.some((item: CustomerProfile) => item.id === customerProfileId.value)) {
+      mergeCustomerProfileOptions(options);
+    } else {
+      customerProfiles.value = options;
+    }
+  } catch (error) {
+    notify(errorMessage(error), 'error');
+  } finally {
+    loadingCustomerProfiles.value = false;
+  }
 }
 
 async function syncGroups() {

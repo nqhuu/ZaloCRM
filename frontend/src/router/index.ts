@@ -33,6 +33,18 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
+    path: '/customers',
+    name: 'CustomerProfiles',
+    component: () => import('@/views/CustomerProfilesView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/customers/:id',
+    name: 'CustomerProfileDetail',
+    component: () => import('@/views/CustomerProfileDetailView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
     // Legacy redirect — now nested under /settings
     path: '/zalo-accounts',
     redirect: '/settings/channels/zalo',

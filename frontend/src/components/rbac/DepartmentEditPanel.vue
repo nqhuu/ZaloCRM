@@ -19,6 +19,14 @@
             <h3 class="section-title">Thông tin</h3>
             <label class="field-label">Tên phòng ban</label>
             <input v-model="localName" class="field-input" @blur="saveName" @keyup.enter="saveName" />
+            <label class="field-label">Mã phòng ban Sheet</label>
+            <input
+              v-model="localLegacyDepartmentCode"
+              class="field-input"
+              placeholder="VD: BPKD"
+              @blur="saveLegacyDepartmentCode"
+              @keyup.enter="saveLegacyDepartmentCode"
+            />
             <div v-if="parentName" class="parent-hint">
               <span class="hint-label">Thuộc:</span>
               <strong>{{ parentName }}</strong>
@@ -174,6 +182,7 @@ const showAddMember = ref(false);
 const newMemberId = ref('');
 
 const localName = ref('');
+const localLegacyDepartmentCode = ref('');
 const localLeaderId = ref<string | null>(null);
 const localDeputyId = ref<string | null>(null);
 const leaderPicker = ref('');
@@ -190,6 +199,7 @@ const accentColor = computed(() => {
 watch(() => [props.open, props.node?.id], async () => {
   if (!props.open || !props.node) return;
   localName.value = props.node.name;
+  localLegacyDepartmentCode.value = props.node.legacyDepartmentCode ?? '';
   localLeaderId.value = props.node.leaderUserId;
   localDeputyId.value = props.node.deputyUserId;
   leaderPicker.value = props.node.leaderUserId ?? '';
@@ -249,6 +259,21 @@ async function saveName() {
   } catch (e: any) {
     error.value = e?.response?.data?.error || 'Lỗi đổi tên';
     localName.value = props.node.name;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveLegacyDepartmentCode() {
+  if (!props.node) return;
+  const trimmed = localLegacyDepartmentCode.value.trim();
+  if (trimmed === (props.node.legacyDepartmentCode ?? '')) return;
+  busy.value = true;
+  try {
+    await store.updateDepartmentLegacyCode(props.node.id, trimmed || null);
+  } catch (e: any) {
+    error.value = e?.response?.data?.error || 'Lỗi đổi mã phòng ban Sheet';
+    localLegacyDepartmentCode.value = props.node.legacyDepartmentCode ?? '';
   } finally {
     busy.value = false;
   }

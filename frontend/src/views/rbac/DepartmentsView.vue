@@ -92,6 +92,8 @@
             <p v-if="createParentName" class="parent-hint"><span class="hint-label">Thuộc:</span><strong>{{ createParentName }}</strong></p>
             <label class="form-label">Tên phòng ban</label>
             <input ref="nameInput" v-model="newName" placeholder="VD: Phòng Kinh Doanh 1" class="form-input" @keyup.enter="submitCreate" />
+            <label class="form-label">Mã phòng ban Sheet</label>
+            <input v-model="newLegacyDepartmentCode" placeholder="VD: BPKD" class="form-input" @keyup.enter="submitCreate" />
             <p v-if="createError" class="form-error">{{ createError }}</p>
           </div>
           <footer class="modal-foot">
@@ -257,6 +259,7 @@ const showCreate = ref(false);
 const createParentId = ref<string | null>(null);
 const createParentName = ref('');
 const newName = ref('');
+const newLegacyDepartmentCode = ref('');
 const createError = ref('');
 const nameInput = ref<HTMLInputElement | null>(null);
 
@@ -264,6 +267,7 @@ function openCreate(parent: DepartmentNode | null) {
   createParentId.value = parent?.id ?? null;
   createParentName.value = parent?.name ?? '';
   newName.value = '';
+  newLegacyDepartmentCode.value = '';
   createError.value = '';
   showCreate.value = true;
   setTimeout(() => nameInput.value?.focus(), 50);
@@ -271,7 +275,11 @@ function openCreate(parent: DepartmentNode | null) {
 async function submitCreate() {
   if (!newName.value.trim()) return;
   try {
-    await store.createDepartment({ name: newName.value.trim(), parentId: createParentId.value });
+    await store.createDepartment({
+      name: newName.value.trim(),
+      legacyDepartmentCode: newLegacyDepartmentCode.value.trim() || null,
+      parentId: createParentId.value,
+    });
     showCreate.value = false;
   } catch (e: any) { createError.value = e?.response?.data?.error || 'Lỗi tạo phòng ban'; }
 }

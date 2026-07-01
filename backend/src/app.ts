@@ -36,6 +36,9 @@ import { statusRoutes } from './modules/contacts/status-routes.js';
 import { contactSubResourceRoutes } from './modules/contacts/contact-sub-resource-routes.js';
 import { appointmentRoutes } from './modules/contacts/appointment-routes.js';
 import { notesRoutes } from './modules/contacts/notes-routes.js';
+import { customerMasterRoutes } from './modules/customers/customer-master-routes.js';
+import { googleServiceAccountRoutes } from './modules/customers/google-service-account-routes.js';
+import { startCustomerMasterCron } from './modules/customers/customer-master-cron.js';
 import { startInteractionCron } from './modules/contacts/interaction-cron.js';
 import { crmTagRoutes } from './modules/contacts/crm-tag-routes.js';
 import { crmTagGroupRoutes } from './modules/contacts/crm-tag-group-routes.js';
@@ -171,6 +174,8 @@ async function bootstrap() {
   await app.register(presetRoutes);
   await app.register(chatAttachmentRoutes);
   await app.register(contactRoutes);
+  await app.register(customerMasterRoutes);
+  await app.register(googleServiceAccountRoutes);
   await app.register(statusRoutes);
   await app.register(contactSubResourceRoutes);
   await app.register(appointmentRoutes);
@@ -279,6 +284,7 @@ async function bootstrap() {
     startZaloHealthCheck();
     startZaloDelegationCron();
     startContactIntelligence();
+    startCustomerMasterCron();
     startLabelsBackgroundSync(60_000); // realtime-ish 2-way pull every 60s
     startInteractionCron(); // daily silent_30d detection (02:00 VN)
     // Phase 8 — Engagement heatmap classification (02:30 VN daily)

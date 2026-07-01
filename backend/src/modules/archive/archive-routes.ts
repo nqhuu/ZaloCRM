@@ -1084,6 +1084,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
       assignedUserId?: string;
       departmentId?: string;
       recordType?: string;
+      customerProfileId?: string;
       conversationId?: string;
       zaloAccountId?: string;
       backupStatus?: string;
@@ -1106,6 +1107,7 @@ export async function archiveRoutes(app: FastifyInstance): Promise<void> {
     const where: any = { ...(await archiveScopeWhere(actor)) };
     if (query.departmentId) where.departmentId = query.departmentId;
     if (query.recordType) where.recordType = query.recordType;
+    if (query.customerProfileId) where.customerProfileId = query.customerProfileId;
     if (query.conversationId) where.conversationId = query.conversationId;
     if (query.zaloAccountId) where.zaloAccountId = query.zaloAccountId;
     if (query.backupStatus) where.backupStatus = query.backupStatus;

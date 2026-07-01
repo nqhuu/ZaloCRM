@@ -184,12 +184,7 @@ export async function createArchiveStory(input: CreateArchiveStoryInput) {
       })
     : null;
   const conversationName = getConversationName(conversation);
-  const customerContext = conversation.threadType === 'group'
-    ? conversation.nativeGroup?.customerLink?.customerProfile || null
-    : conversation.contact?.customerProfileLink?.customerProfile || null;
-  const customerContextSubjectId = conversation.threadType === 'group'
-    ? conversation.nativeGroupId
-    : conversation.contactId;
+  const customerContext = resolveArchiveCustomerContext(conversation);
   const title = oneLine(input.title);
   const initialStatus = await resolveDefaultArchiveStatus(input.orgId, assignment.departmentId);
 
@@ -210,10 +205,8 @@ export async function createArchiveStory(input: CreateArchiveStoryInput) {
         customerProfileId: customerContext?.id || null,
         customerProfileCodeSnapshot: customerContext?.code || null,
         customerProfileNameSnapshot: customerContext?.name || null,
-        customerContextType: customerContext
-          ? (conversation.threadType === 'group' ? 'group' : 'direct_user')
-          : null,
-        customerContextSubjectId: customerContext ? customerContextSubjectId : null,
+        customerContextType: customerContext?.type || null,
+        customerContextSubjectId: customerContext?.subjectId || null,
         createdByUserId: input.userId,
         assignedUserId: assignment.assignedUserId,
         departmentId: assignment.departmentId,
@@ -522,9 +515,15 @@ async function loadConversation(conversationId: string, orgId: string) {
     include: {
       contact: {
         select: {
+          id: true,
           fullName: true,
           phone: true,
           customerProfileLink: { include: { customerProfile: true } },
+          customerProfileContacts: {
+            where: { isActive: true },
+            include: { customerProfile: true },
+            orderBy: [{ isPrimary: 'desc' }, { linkedAt: 'desc' }],
+          },
         },
       },
       nativeGroup: {
@@ -544,6 +543,42 @@ async function loadConversation(conversationId: string, orgId: string) {
   });
   if (!conversation) throw new Error('Conversation not found');
   return conversation;
+}
+
+function resolveArchiveCustomerContext(conversation: Awaited<ReturnType<typeof loadConversation>>) {
+  if (conversation.threadType === 'group') {
+    const customerProfile = conversation.nativeGroup?.customerLink?.customerProfile || null;
+    return customerProfile
+      ? {
+          ...customerProfile,
+          type: 'group',
+          subjectId: conversation.nativeGroupId || null,
+        }
+      : null;
+  }
+
+  const contact = conversation.contact;
+  if (!contact) return null;
+
+  const directUserProfile = contact.customerProfileLink?.customerProfile || null;
+  if (directUserProfile) {
+    return {
+      ...directUserProfile,
+      type: 'direct_user',
+      subjectId: conversation.contactId || contact.id,
+    };
+  }
+
+  const activeCustomerLinks = contact.customerProfileContacts || [];
+  if (activeCustomerLinks.length === 1) {
+    return {
+      ...activeCustomerLinks[0].customerProfile,
+      type: 'direct_contact',
+      subjectId: conversation.contactId || contact.id,
+    };
+  }
+
+  return null;
 }
 
 async function ensureConversationWriteAccess(

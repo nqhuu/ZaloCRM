@@ -21,6 +21,7 @@ export type DeptRole = 'leader' | 'deputy' | 'member';
 export interface DepartmentNode {
   id: string;
   name: string;
+  legacyDepartmentCode: string | null;
   parentId: string | null;
   path: string;
   depth: number;
@@ -66,6 +67,7 @@ export async function getOrgDepartmentTree(orgId: string): Promise<DepartmentNod
     nodeMap.set(d.id, {
       id: d.id,
       name: d.name,
+      legacyDepartmentCode: d.legacyDepartmentCode,
       parentId: d.parentId,
       path: d.path,
       depth: d.depth,
@@ -114,10 +116,11 @@ export async function getDepartmentSubtree(orgId: string, deptId: string): Promi
 export async function createDepartment(input: {
   orgId: string;
   name: string;
+  legacyDepartmentCode?: string | null;
   parentId: string | null;
   displayOrder?: number;
   defaultArchiveRecordType?: string;
-}): Promise<{ id: string; name: string; path: string; depth: number }> {
+}): Promise<{ id: string; name: string; legacyDepartmentCode: string | null; path: string; depth: number }> {
   if (!input.name?.trim()) throw new Error('Tên phòng ban không được trống');
   if (input.name.length > 100) throw new Error('Tên phòng ban quá dài (>100 ký tự)');
 
@@ -147,13 +150,14 @@ export async function createDepartment(input: {
         id: newId,
         orgId: input.orgId,
         name: input.name.trim(),
+        legacyDepartmentCode: input.legacyDepartmentCode?.trim() || null,
         parentId: input.parentId,
         displayOrder: input.displayOrder ?? 0,
         defaultArchiveRecordType: input.defaultArchiveRecordType || 'order',
         path,
         depth,
       },
-      select: { id: true, name: true, path: true, depth: true },
+      select: { id: true, name: true, legacyDepartmentCode: true, path: true, depth: true },
     });
     return created;
   });
@@ -163,10 +167,11 @@ export async function updateDepartment(input: {
   orgId: string;
   id: string;
   name?: string;
+  legacyDepartmentCode?: string | null;
   parentId?: string | null;
   displayOrder?: number;
   defaultArchiveRecordType?: string;
-}): Promise<{ id: string; name: string; path: string; depth: number }> {
+}): Promise<{ id: string; name: string; legacyDepartmentCode: string | null; path: string; depth: number }> {
   if (input.parentId === input.id) {
     throw new Error('Phòng ban không thể là con của chính nó');
   }
@@ -185,6 +190,7 @@ export async function updateDepartment(input: {
 
     const data: Record<string, unknown> = {};
     if (input.name !== undefined) data.name = input.name.trim();
+    if (input.legacyDepartmentCode !== undefined) data.legacyDepartmentCode = input.legacyDepartmentCode?.trim() || null;
     if (input.displayOrder !== undefined) data.displayOrder = input.displayOrder;
     if (input.defaultArchiveRecordType !== undefined) {
       const allowed = new Set(['order', 'quotation', 'customer_care', 'other']);
@@ -248,7 +254,7 @@ export async function updateDepartment(input: {
     const updated = await tx.department.update({
       where: { id: input.id },
       data,
-      select: { id: true, name: true, path: true, depth: true },
+      select: { id: true, name: true, legacyDepartmentCode: true, path: true, depth: true },
     });
     return updated;
   });

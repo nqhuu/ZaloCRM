@@ -2,22 +2,24 @@ import { createSign } from 'node:crypto';
 import { basename } from 'node:path';
 import { config } from '../../config/index.js';
 import { sheetValue } from './archive-format.js';
+import { loadGoogleServiceAccountCredentials } from '../customers/google-service-account-service.js';
 
-interface ServiceAccount {
-  client_email: string;
-  private_key: string;
-  token_uri?: string;
-}
-
-let cachedToken: { value: string; expiresAt: number } | null = null;
+const cachedTokens = new Map<string, { value: string; expiresAt: number }>();
 
 export function isGoogleArchiveConfigured(): boolean {
-  return Boolean(config.googleServiceAccountJson);
+  return Boolean(
+    config.googleServiceAccountJson
+    || process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64
+    || process.env.GOOGLE_SERVICE_ACCOUNT_FILE
+  );
 }
 
-async function accessToken(): Promise<string> {
+async function accessToken(orgId?: string): Promise<string> {
+  const loaded = await loadGoogleServiceAccountCredentials(orgId);
+  const credentials = loaded.credentials;
+  const cacheKey = `${loaded.source}:${orgId || 'global'}:${credentials.client_email}`;
+  const cachedToken = cachedTokens.get(cacheKey);
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
-  const credentials = parseCredentials();
   const now = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
   const claims = base64Url(JSON.stringify({
@@ -46,10 +48,10 @@ async function accessToken(): Promise<string> {
   });
   if (!response.ok) throw new Error(`Google OAuth ${response.status}: ${(await response.text()).slice(0, 300)}`);
   const data = await response.json() as { access_token: string; expires_in?: number };
-  cachedToken = {
+  cachedTokens.set(cacheKey, {
     value: data.access_token,
     expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
-  };
+  });
   return data.access_token;
 }
 
@@ -117,14 +119,33 @@ export async function readSheetRows(input: {
   spreadsheetId: string;
   sheetName: string;
   range?: string;
+  orgId?: string;
 }): Promise<unknown[][]> {
   const target = `${quoteSheet(input.sheetName)}!${input.range || 'A:Z'}`;
   const response = await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}/values/${encodeURIComponent(target)}?majorDimension=ROWS`,
     { method: 'GET', signal: AbortSignal.timeout(30_000) },
+    input.orgId,
   );
   const data = await response.json() as { values?: unknown[][] };
   return Array.isArray(data.values) ? data.values : [];
+}
+
+export async function testGoogleSheetsConnection(input: {
+  orgId?: string;
+  spreadsheetId?: string | null;
+}): Promise<{ ok: true; spreadsheetTitle?: string | null }> {
+  if (!input.spreadsheetId) {
+    await accessToken(input.orgId);
+    return { ok: true };
+  }
+  const response = await googleFetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(input.spreadsheetId)}?fields=properties.title`,
+    { method: 'GET', signal: AbortSignal.timeout(30_000) },
+    input.orgId,
+  );
+  const data = await response.json() as { properties?: { title?: string } };
+  return { ok: true, spreadsheetTitle: data.properties?.title || null };
 }
 
 export async function updateSheetRow(input: {
@@ -244,23 +265,50 @@ export async function mergeConversationNameBlock(input: {
   );
 }
 
-async function googleFetch(url: string, init: RequestInit): Promise<Response> {
-  const token = await accessToken();
+async function googleFetch(url: string, init: RequestInit, orgId?: string): Promise<Response> {
+  const token = await accessToken(orgId);
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(url, { ...init, headers });
-  if (!response.ok) throw new Error(`Google API ${response.status}: ${(await response.text()).slice(0, 500)}`);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(formatGoogleApiError(response.status, body));
+  }
   return response;
 }
 
-function parseCredentials(): ServiceAccount {
+function formatGoogleApiError(status: number, body: string): string {
+  const fallback = `Google API ${status}: ${body.slice(0, 500)}`;
   try {
-    const parsed = JSON.parse(config.googleServiceAccountJson) as ServiceAccount;
-    if (!parsed.client_email || !parsed.private_key) throw new Error('missing client_email/private_key');
-    parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
-    return parsed;
-  } catch (error) {
-    throw new Error(`GOOGLE_SERVICE_ACCOUNT_JSON is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    const parsed = JSON.parse(body) as {
+      error?: {
+        message?: string;
+        status?: string;
+        details?: Array<{
+          reason?: string;
+          service?: string;
+          consumer?: string;
+          activationUrl?: string;
+        }>;
+      };
+    };
+    const error = parsed.error;
+    const detail = error?.details?.find((item) => item.reason || item.service || item.activationUrl);
+    if (detail?.reason === 'SERVICE_DISABLED' || error?.message?.includes('has not been used') || error?.message?.includes('disabled')) {
+      const serviceName = detail?.service === 'sheets.googleapis.com' ? 'Google Sheets API' : (detail?.service || 'Google API');
+      const projectId = detail?.consumer?.replace(/^projects\//, '') || '';
+      return [
+        `${serviceName} chưa được bật cho Google Cloud project${projectId ? ` ${projectId}` : ''}.`,
+        detail?.activationUrl ? `Mở link này để bật API: ${detail.activationUrl}` : 'Hãy bật Google Sheets API trong Google Cloud Console.',
+        'Sau khi bật, đợi vài phút rồi bấm Đồng bộ lại.',
+      ].join(' ');
+    }
+    if (status === 403 && error?.status === 'PERMISSION_DENIED') {
+      return `${error.message || 'Google từ chối quyền truy cập.'} Hãy kiểm tra đã share Sheet cho client_email của service account chưa.`;
+    }
+    return `Google API ${status}: ${error?.message || body.slice(0, 500)}`;
+  } catch {
+    return fallback;
   }
 }
 

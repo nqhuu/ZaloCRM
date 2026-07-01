@@ -3,16 +3,17 @@
  * Key sourced from FB_TOKEN_ENC_KEY env (32-byte hex = 64 hex chars).
  * Output format (all base64): "<iv_b64>:<authTag_b64>:<ciphertext_b64>"
  */
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { config } from '../../config/index.js';
 
 const ALGO = 'aes-256-gcm';
 const IV_BYTES = 12;    // 96-bit IV recommended for GCM
 const TAG_BYTES = 16;   // 128-bit auth tag
 
 function getKey(): Buffer {
-  const hex = process.env.FB_TOKEN_ENC_KEY;
-  if (!hex || hex.length !== 64) {
-    throw new Error('[aes-gcm] FB_TOKEN_ENC_KEY must be a 64-char hex string (32 bytes)');
+  const hex = (process.env.FB_TOKEN_ENC_KEY || config.encryptionKey || '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(hex)) {
+    throw new Error('[aes-gcm] ENCRYPTION_KEY must be a 64-char hex string (32 bytes)');
   }
   return Buffer.from(hex, 'hex');
 }

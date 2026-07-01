@@ -5,7 +5,9 @@ import { authMiddleware } from '../auth/auth-middleware.js';
 import { getZaloScope } from './zalo-scope.js';
 import { zaloPool } from './zalo-pool.js';
 import { syncNativeGroupsForAccount } from './shared-group-service.js';
-import { readSheetRows } from '../archive/google-archive-client.js';
+import { runAdhocCustomerSheetSync } from '../customers/customer-master-sync-service.js';
+import { normalizePhone } from '../../shared/utils/phone.js';
+import { backfillArchiveStoriesForCustomerProfile } from '../archive/archive-customer-context-service.js';
 
 type Actor = { id: string; orgId: string; role: string };
 type SubjectType = 'user' | 'group';
@@ -50,10 +52,198 @@ async function loadVisibleContact(actor: Actor, id: string) {
     where: {
       id,
       orgId: actor.orgId,
-      ...(isAdmin(actor) ? {} : { conversations: { some: { zaloAccountId: { in: accountIds } } } }),
+      ...(isAdmin(actor)
+        ? {}
+        : {
+            OR: [
+              { conversations: { some: { zaloAccountId: { in: accountIds } } } },
+              { friends: { some: { zaloAccountId: { in: accountIds } } } },
+            ],
+          }),
     },
-    select: { id: true, zaloGlobalId: true },
+    select: {
+      id: true,
+      zaloGlobalId: true,
+      zaloUsername: true,
+      phone: true,
+      phoneNormalized: true,
+      fullName: true,
+      crmName: true,
+      metadata: true,
+      avatarUrl: true,
+      hasZalo: true,
+      friends: {
+        select: {
+          aliasInNick: true,
+          zaloDisplayName: true,
+          zaloGlobalId: true,
+          zaloUsername: true,
+          relationshipKind: true,
+          friendshipStatus: true,
+          zaloAccount: { select: { id: true, displayName: true, phone: true } },
+        },
+        take: 5,
+        orderBy: { lastInteractionAt: { sort: 'desc', nulls: 'last' } },
+      },
+    },
   });
+}
+
+type VisibleZaloContact = NonNullable<Awaited<ReturnType<typeof loadVisibleContact>>>;
+
+function trimOrNull(value?: string | null): string | null {
+  const text = String(value || '').trim();
+  return text || null;
+}
+
+function equivalentContactWhere(contact: Pick<VisibleZaloContact, 'id' | 'zaloGlobalId' | 'phoneNormalized'>): Prisma.ContactWhereInput {
+  return {
+    OR: [
+      { id: contact.id },
+      ...(contact.zaloGlobalId ? [{ zaloGlobalId: contact.zaloGlobalId }] : []),
+      ...(contact.phoneNormalized ? [{ phoneNormalized: contact.phoneNormalized }] : []),
+    ],
+  };
+}
+
+function visibleContactDisplayName(contact: VisibleZaloContact): string | null {
+  return trimOrNull(contact.crmName || contact.fullName || contact.phone);
+}
+
+function preferredVisibleZaloIdentity(contact: VisibleZaloContact) {
+  const friend = [...(contact.friends || [])].sort((left, right) => {
+    const leftRank = left.friendshipStatus === 'accepted' ? 0 : left.relationshipKind === 'chatting_stranger' ? 1 : 2;
+    const rightRank = right.friendshipStatus === 'accepted' ? 0 : right.relationshipKind === 'chatting_stranger' ? 1 : 2;
+    return leftRank - rightRank;
+  })[0];
+  return {
+    displayName: trimOrNull(friend?.aliasInNick || friend?.zaloDisplayName || contact.zaloUsername || contact.fullName || contact.crmName),
+    globalId: trimOrNull(friend?.zaloGlobalId || contact.zaloGlobalId),
+    username: trimOrNull(friend?.zaloUsername || contact.zaloUsername),
+    accountName: trimOrNull(friend?.zaloAccount?.displayName || friend?.zaloAccount?.phone),
+  };
+}
+
+function buildZaloUserLinkSnapshot(contact: VisibleZaloContact) {
+  const zalo = preferredVisibleZaloIdentity(contact);
+  return {
+    contactDisplayNameSnapshot: visibleContactDisplayName(contact),
+    zaloDisplayNameSnapshot: zalo.displayName,
+    phoneSnapshot: trimOrNull(contact.phone || contact.phoneNormalized),
+    zaloGlobalIdSnapshot: zalo.globalId,
+    zaloUsernameSnapshot: zalo.username,
+  };
+}
+
+function buildVisibleContactZaloMetadata(contact: VisibleZaloContact) {
+  const zalo = preferredVisibleZaloIdentity(contact);
+  const phone = trimOrNull(contact.phone || contact.phoneNormalized);
+  const normalizedPhone = phone ? normalizePhone(phone) : null;
+  const current = (contact.metadata && typeof contact.metadata === 'object' && !Array.isArray(contact.metadata))
+    ? contact.metadata as Record<string, unknown>
+    : {};
+  const existingEntries = Array.isArray((current as any).zaloNickByPhone)
+    ? (current as any).zaloNickByPhone
+    : [];
+  const nextEntry = {
+    phone,
+    normalizedPhone,
+    zaloDisplayName: zalo.displayName,
+    zaloGlobalId: zalo.globalId,
+    zaloUsername: zalo.username,
+    accountName: zalo.accountName,
+    syncedAt: new Date().toISOString(),
+  };
+  return {
+    ...current,
+    zaloNickByPhone: [
+      ...existingEntries.filter((item: any) => (
+        item?.normalizedPhone
+          ? item.normalizedPhone !== nextEntry.normalizedPhone
+          : item?.phone !== nextEntry.phone
+      )),
+      nextEntry,
+    ],
+    lastZaloNickForPhone: nextEntry,
+  };
+}
+
+async function syncZaloUserToCustomerContact(input: {
+  actor: Actor;
+  customerProfileId: string;
+  contact: VisibleZaloContact;
+}) {
+  const phone = input.contact.phone || input.contact.phoneNormalized || '';
+  const normalizedPhone = normalizePhone(phone);
+  if (!phone.trim()) {
+    return {
+      status: 'skipped_missing_phone' as const,
+      message: 'User Zalo chưa có số điện thoại nên chưa thể tạo Người liên hệ.',
+    };
+  }
+  if (!normalizedPhone) {
+    return {
+      status: 'skipped_invalid_phone' as const,
+      message: 'User Zalo có số điện thoại nhưng chưa hợp lệ nên chưa thể tạo Người liên hệ.',
+    };
+  }
+
+  const activeOtherCount = await prisma.customerProfileContact.count({
+    where: {
+      orgId: input.actor.orgId,
+      customerProfileId: input.customerProfileId,
+      isActive: true,
+      contactId: { not: input.contact.id },
+    },
+  });
+  const link = await prisma.customerProfileContact.upsert({
+    where: {
+      customerProfileId_contactId: {
+        customerProfileId: input.customerProfileId,
+        contactId: input.contact.id,
+      },
+    },
+    create: {
+      orgId: input.actor.orgId,
+      customerProfileId: input.customerProfileId,
+      contactId: input.contact.id,
+      role: 'other',
+      isPrimary: activeOtherCount === 0,
+      source: 'zalo_user_phone_sync',
+      rawText: 'Tự động gắn từ User Zalo có số điện thoại',
+      linkedByUserId: input.actor.id,
+    },
+    update: {
+      isActive: true,
+      unlinkedAt: null,
+      linkedByUserId: input.actor.id,
+      linkedAt: new Date(),
+      source: 'zalo_user_phone_sync',
+      ...(activeOtherCount === 0 ? { isPrimary: true } : {}),
+    },
+  });
+
+  const contactData: Prisma.ContactUpdateInput = {
+    metadata: buildVisibleContactZaloMetadata(input.contact),
+  };
+  if (!input.contact.phone && input.contact.phoneNormalized) {
+    contactData.phone = input.contact.phoneNormalized;
+    contactData.phoneNormalized = normalizedPhone;
+  } else if (input.contact.phone && input.contact.phoneNormalized !== normalizedPhone) {
+    contactData.phoneNormalized = normalizedPhone;
+  }
+  await prisma.contact.update({
+    where: { id: input.contact.id },
+    data: contactData,
+  });
+
+  return {
+    status: 'linked' as const,
+    message: activeOtherCount === 0
+      ? 'Đã gắn User Zalo vào Người liên hệ và đặt làm liên hệ chính đầu tiên.'
+      : 'Đã gắn User Zalo vào Người liên hệ.',
+    link,
+  };
 }
 
 const groupInclude = {
@@ -109,20 +299,6 @@ async function ensureAssigneeAccess(actor: Actor, assigneeUserId: string, accoun
     },
   });
   return Boolean(user && (user.zaloAccounts.length > 0 || user.zaloAccess.length > 0));
-}
-
-function normalizedHeader(value: unknown): string {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
-
-function columnIndex(headers: string[], aliases: string[], explicit?: string): number {
-  const wanted = explicit ? [normalizedHeader(explicit), ...aliases] : aliases;
-  return headers.findIndex((header) => wanted.includes(header));
 }
 
 export async function sharedGroupRoutes(app: FastifyInstance): Promise<void> {
@@ -199,6 +375,88 @@ export async function sharedGroupRoutes(app: FastifyInstance): Promise<void> {
       results.push({ accountId, status: 'synced', ...result });
     }
     return { results };
+  });
+
+  app.get('/api/v1/customer-profiles/link-options/zalo-users', async (request) => {
+    const actor = request.user! as Actor;
+    const query = request.query as { q?: string; limit?: string; linkStatus?: 'linked' | 'unlinked' };
+    const accountIds = await accessibleAccountIds(actor);
+    const q = String(query.q || '').trim();
+    const digits = q.replace(/[^\d]/g, '');
+    const limit = Math.min(Math.max(Number(query.limit || 20), 5), 50);
+    const andFilters: Prisma.ContactWhereInput[] = [];
+    if (!isAdmin(actor)) {
+      andFilters.push({
+        OR: [
+          { conversations: { some: { zaloAccountId: { in: accountIds } } } },
+          { friends: { some: { zaloAccountId: { in: accountIds } } } },
+        ],
+      });
+    }
+    if (q) {
+      andFilters.push({
+        OR: [
+          { fullName: { contains: q, mode: 'insensitive' } },
+          { crmName: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q } },
+          ...(digits ? [{ phoneNormalized: { contains: digits } }] : []),
+          { zaloUsername: { contains: q, mode: 'insensitive' } },
+          { zaloGlobalId: { contains: q } },
+          { zaloUid: { contains: q } },
+        ],
+      });
+    }
+    const contacts = await prisma.contact.findMany({
+      where: {
+        orgId: actor.orgId,
+        mergedInto: null,
+        zaloGlobalId: { not: null },
+        ...(query.linkStatus === 'linked' ? { customerProfileLink: { isNot: null } } : {}),
+        ...(query.linkStatus === 'unlinked' ? { customerProfileLink: { is: null } } : {}),
+        ...(andFilters.length ? { AND: andFilters } : {}),
+      },
+      select: {
+        id: true,
+        fullName: true,
+        crmName: true,
+        zaloUsername: true,
+        zaloGlobalId: true,
+        phone: true,
+        phoneNormalized: true,
+        avatarUrl: true,
+        hasZalo: true,
+        conversations: {
+          select: {
+            zaloAccount: { select: { id: true, displayName: true, phone: true } },
+          },
+          take: 3,
+          orderBy: { lastMessageAt: { sort: 'desc', nulls: 'last' } },
+        },
+        friends: {
+          select: {
+            aliasInNick: true,
+            zaloDisplayName: true,
+            zaloGlobalId: true,
+            zaloUsername: true,
+            zaloUidInNick: true,
+            relationshipKind: true,
+            friendshipStatus: true,
+            zaloAccount: { select: { id: true, displayName: true, phone: true } },
+          },
+          take: 5,
+          orderBy: { lastInteractionAt: { sort: 'desc', nulls: 'last' } },
+        },
+        customerProfileLink: {
+          select: {
+            customerProfileId: true,
+            customerProfile: { select: { id: true, code: true, externalKey: true, name: true } },
+          },
+        },
+      },
+      orderBy: [{ lastActivity: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'desc' }],
+      take: limit,
+    });
+    return { contacts };
   });
 
   app.post('/api/v1/zalo-subjects/:type/:id/tags', async (request, reply) => {
@@ -319,24 +577,55 @@ export async function sharedGroupRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/api/v1/customer-profiles', async (request) => {
     const actor = request.user! as Actor;
-    const { q = '' } = request.query as { q?: string };
-    const profiles = await prisma.customerProfile.findMany({
-      where: {
-        orgId: actor.orgId,
-        ...(q ? {
-          OR: [
-            { name: { contains: q, mode: 'insensitive' } },
-            { code: { contains: q, mode: 'insensitive' } },
-            { externalKey: { contains: q, mode: 'insensitive' } },
-            { phone: { contains: q } },
-          ],
-        } : {}),
+    const query = request.query as { q?: string; page?: string; pageSize?: string };
+    const q = String(query.q || '').trim();
+    const page = Math.max(1, Number(query.page || 1) || 1);
+    const pageSize = Math.min(200, Math.max(10, Number(query.pageSize || 50) || 50));
+    const where: Prisma.CustomerProfileWhereInput = {
+      orgId: actor.orgId,
+      ...(q ? {
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { shortName: { contains: q, mode: 'insensitive' } },
+          { code: { contains: q, mode: 'insensitive' } },
+          { externalKey: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { taxCode: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q } },
+          { mainPhone: { contains: q } },
+          { provinceOrRegion: { contains: q, mode: 'insensitive' } },
+          { officeAddress: { contains: q, mode: 'insensitive' } },
+          { legalRepresentativeRaw: { contains: q, mode: 'insensitive' } },
+          { salesOwnerCodeSnapshot: { contains: q, mode: 'insensitive' } },
+          { managingDepartmentCodeSnapshot: { contains: q, mode: 'insensitive' } },
+          { customerTypeCodeSnapshot: { contains: q, mode: 'insensitive' } },
+        ],
+      } : {}),
+    };
+    const [total, profiles] = await Promise.all([
+      prisma.customerProfile.count({ where }),
+      prisma.customerProfile.findMany({
+        where,
+        include: {
+          ownerUser: { select: { id: true, fullName: true } },
+          managingDepartment: { select: { id: true, name: true } },
+          customerType: true,
+          _count: { select: { zaloGroups: true, zaloUsers: true, contacts: true, archiveStories: true } },
+        },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    return {
+      profiles,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
       },
-      include: { _count: { select: { zaloGroups: true, zaloUsers: true, archiveStories: true } } },
-      orderBy: [{ name: 'asc' }],
-      take: 500,
-    });
-    return { profiles };
+    };
   });
 
   app.post('/api/v1/customer-profiles/sync-google-sheet', async (request, reply) => {
@@ -346,59 +635,26 @@ export async function sharedGroupRoutes(app: FastifyInstance): Promise<void> {
       spreadsheetId?: string;
       sheetName?: string;
       range?: string;
-      columns?: Partial<Record<'externalKey' | 'code' | 'name' | 'phone' | 'email', string>>;
+      headerRow?: number;
+      columns?: Record<string, string>;
     };
     if (!body.spreadsheetId || !body.sheetName) return badRequest(reply, 'spreadsheetId and sheetName are required');
-    const rows = await readSheetRows({ spreadsheetId: body.spreadsheetId, sheetName: body.sheetName, range: body.range });
-    if (rows.length === 0) return { synced: 0, skipped: 0, errors: [] };
-    const headers = rows[0].map(normalizedHeader);
-    const indexes = {
-      externalKey: columnIndex(headers, ['external_key', 'customer_id', 'id', 'ma_khach_hang', 'ma_kh'], body.columns?.externalKey),
-      code: columnIndex(headers, ['code', 'customer_code', 'ma_khach_hang', 'ma_kh'], body.columns?.code),
-      name: columnIndex(headers, ['name', 'customer_name', 'ten_khach_hang', 'ten_kh'], body.columns?.name),
-      phone: columnIndex(headers, ['phone', 'so_dien_thoai', 'sdt'], body.columns?.phone),
-      email: columnIndex(headers, ['email'], body.columns?.email),
+    const result = await runAdhocCustomerSheetSync({
+      orgId: actor.orgId,
+      actorUserId: actor.id,
+      spreadsheetId: body.spreadsheetId,
+      sheetName: body.sheetName,
+      range: body.range,
+      headerRow: body.headerRow,
+      columns: body.columns as any,
+    });
+    return {
+      synced: result.createdCount + result.updatedCount,
+      created: result.createdCount,
+      updated: result.updatedCount,
+      skipped: result.skippedCount,
+      errors: result.errors.slice(0, 100),
     };
-    if (indexes.externalKey < 0 || indexes.name < 0) {
-      return badRequest(reply, 'Sheet must contain stable customer ID and customer name columns');
-    }
-    let synced = 0;
-    let skipped = 0;
-    const errors: Array<{ row: number; error: string }> = [];
-    for (let offset = 1; offset < rows.length; offset++) {
-      const row = rows[offset];
-      const externalKey = String(row[indexes.externalKey] || '').trim();
-      const name = String(row[indexes.name] || '').trim();
-      if (!externalKey || !name) {
-        skipped++;
-        errors.push({ row: offset + 1, error: 'Missing customer ID or name' });
-        continue;
-      }
-      await prisma.customerProfile.upsert({
-        where: { orgId_externalKey: { orgId: actor.orgId, externalKey } },
-        create: {
-          orgId: actor.orgId,
-          externalKey,
-          code: indexes.code >= 0 ? String(row[indexes.code] || '').trim() || null : null,
-          name,
-          phone: indexes.phone >= 0 ? String(row[indexes.phone] || '').trim() || null : null,
-          email: indexes.email >= 0 ? String(row[indexes.email] || '').trim() || null : null,
-          source: 'google_sheet',
-          metadata: { spreadsheetId: body.spreadsheetId, sheetName: body.sheetName, row: offset + 1 },
-          syncedAt: new Date(),
-        },
-        update: {
-          code: indexes.code >= 0 ? String(row[indexes.code] || '').trim() || null : null,
-          name,
-          phone: indexes.phone >= 0 ? String(row[indexes.phone] || '').trim() || null : null,
-          email: indexes.email >= 0 ? String(row[indexes.email] || '').trim() || null : null,
-          metadata: { spreadsheetId: body.spreadsheetId, sheetName: body.sheetName, row: offset + 1 },
-          syncedAt: new Date(),
-        },
-      });
-      synced++;
-    }
-    return { synced, skipped, errors: errors.slice(0, 100) };
   });
 
   app.post('/api/v1/customer-profiles/:id/zalo-groups', async (request, reply) => {
@@ -422,7 +678,11 @@ export async function sharedGroupRoutes(app: FastifyInstance): Promise<void> {
       update: { customerProfileId: id, linkedByUserId: actor.id, linkedAt: new Date(), source: 'manual_assignment' },
       include: { customerProfile: true, nativeGroup: true },
     });
-    return reply.status(current ? 200 : 201).send({ link });
+    const archiveBackfill = await backfillArchiveStoriesForCustomerProfile({
+      orgId: actor.orgId,
+      customerProfileId: id,
+    });
+    return reply.status(current ? 200 : 201).send({ link, archiveBackfill });
   });
 
   app.delete('/api/v1/customer-profiles/:id/zalo-groups/:nativeGroupId', async (request, reply) => {
@@ -454,25 +714,71 @@ export async function sharedGroupRoutes(app: FastifyInstance): Promise<void> {
     if (current && current.customerProfileId !== id && !body.confirmTransfer) {
       return reply.status(409).send({ error: 'Zalo user already belongs to another direct customer profile', current });
     }
+    const snapshotData = buildZaloUserLinkSnapshot(contact);
     const link = await prisma.customerProfileZaloUser.upsert({
       where: { contactId: body.contactId },
-      create: { orgId: actor.orgId, customerProfileId: id, contactId: body.contactId, linkedByUserId: actor.id },
-      update: { customerProfileId: id, linkedByUserId: actor.id, linkedAt: new Date(), source: 'manual_assignment' },
+      create: {
+        orgId: actor.orgId,
+        customerProfileId: id,
+        contactId: body.contactId,
+        linkedByUserId: actor.id,
+        ...snapshotData,
+      },
+      update: {
+        customerProfileId: id,
+        linkedByUserId: actor.id,
+        linkedAt: new Date(),
+        source: 'manual_assignment',
+        ...snapshotData,
+      },
       include: { customerProfile: true, contact: true },
     });
-    return reply.status(current ? 200 : 201).send({ link });
+    const contactSync = await syncZaloUserToCustomerContact({
+      actor,
+      customerProfileId: id,
+      contact,
+    });
+    const archiveBackfill = await backfillArchiveStoriesForCustomerProfile({
+      orgId: actor.orgId,
+      customerProfileId: id,
+    });
+    return reply.status(current ? 200 : 201).send({ link, contactSync, archiveBackfill });
   });
 
   app.delete('/api/v1/customer-profiles/:id/zalo-users/:contactId', async (request, reply) => {
     const actor = request.user! as Actor;
     if (!(await canManageWork(actor))) return reply.status(403).send({ error: 'Manager permission required' });
     const { id, contactId } = request.params as { id: string; contactId: string };
+    const query = (request.query || {}) as { unlinkContact?: string };
+    const unlinkContact = query.unlinkContact === 'true';
     const contact = await loadVisibleContact(actor, contactId);
     if (!contact) return reply.status(404).send({ error: 'Customer user link not found' });
-    const result = await prisma.customerProfileZaloUser.deleteMany({
-      where: { orgId: actor.orgId, customerProfileId: id, contactId },
+    const result = await prisma.$transaction(async (tx) => {
+      const counterpartLinks = await tx.customerProfileContact.findMany({
+        where: {
+          orgId: actor.orgId,
+          customerProfileId: id,
+          isActive: true,
+          contact: equivalentContactWhere(contact),
+        },
+        select: { id: true },
+      });
+      const userResult = await tx.customerProfileZaloUser.deleteMany({
+        where: { orgId: actor.orgId, customerProfileId: id, contactId },
+      });
+      if (unlinkContact && counterpartLinks.length) {
+        await tx.customerProfileContact.updateMany({
+          where: { id: { in: counterpartLinks.map((link) => link.id) } },
+          data: { isActive: false, unlinkedAt: new Date() },
+        });
+      }
+      return {
+        userCount: userResult.count,
+        counterpartFound: counterpartLinks.length > 0,
+        counterpartUnlinked: unlinkContact ? counterpartLinks.length : 0,
+      };
     });
-    if (!result.count) return reply.status(404).send({ error: 'Customer user link not found' });
-    return { ok: true };
+    if (!result.userCount) return reply.status(404).send({ error: 'Customer user link not found' });
+    return { ok: true, ...result };
   });
 }

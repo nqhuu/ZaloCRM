@@ -27,6 +27,15 @@
               @blur="saveFullName"
               @keyup.enter="saveFullName"
             />
+            <label class="field-label">Mã nhân viên Sheet</label>
+            <input
+              v-model="localLegacyEmployeeCode"
+              class="field-input"
+              :disabled="!canEditInfo || busy"
+              placeholder="VD: DA01"
+              @blur="saveLegacyEmployeeCode"
+              @keyup.enter="saveLegacyEmployeeCode"
+            />
             <label class="field-label">Email</label>
             <input
               v-model="localEmail"
@@ -206,6 +215,7 @@ const busy = ref(false);
 const error = ref('');
 
 const localFullName = ref('');
+const localLegacyEmployeeCode = ref('');
 const localEmail = ref('');
 const deptIdLocal = ref<string>('');
 const deptRoleLocal = ref<'leader' | 'deputy' | 'member'>('member');
@@ -272,6 +282,7 @@ watch(
   async () => {
     if (!props.open || !props.user) return;
     localFullName.value = props.user.fullName ?? '';
+    localLegacyEmployeeCode.value = props.user.legacyEmployeeCode ?? '';
     localEmail.value = props.user.email ?? '';
     deptIdLocal.value = props.user.departmentMember?.departmentId ?? '';
     deptRoleLocal.value = props.user.departmentMember?.deptRole ?? 'member';
@@ -326,6 +337,22 @@ async function saveEmail() {
   } catch (e: any) {
     error.value = e?.response?.data?.error || 'Lỗi đổi email';
     localEmail.value = props.user.email;
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveLegacyEmployeeCode() {
+  if (!props.user || !canEditInfo.value) return;
+  const trimmed = localLegacyEmployeeCode.value.trim();
+  if (trimmed === (props.user.legacyEmployeeCode ?? '')) return;
+  busy.value = true;
+  try {
+    await api.put(`/users/${props.user.id}`, { legacyEmployeeCode: trimmed || null });
+    emit('changed');
+  } catch (e: any) {
+    error.value = e?.response?.data?.error || 'Lỗi đổi mã nhân viên Sheet';
+    localLegacyEmployeeCode.value = props.user.legacyEmployeeCode ?? '';
   } finally {
     busy.value = false;
   }

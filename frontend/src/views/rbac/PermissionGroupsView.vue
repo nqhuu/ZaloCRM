@@ -341,6 +341,7 @@ const RESOURCE_LABELS: Record<string, { icon: string; label: string }> = {
   permission_group: { icon: '🛡', label: 'Nhóm quyền' },
   conversation: { icon: '💬', label: 'Hội thoại' },
   contact: { icon: '👥', label: 'Khách hàng' },
+  customer_source: { icon: '📥', label: 'Nguồn đồng bộ KH' },
   friend: { icon: '🫂', label: 'Friends Zalo' },
   customer_list: { icon: '📋', label: 'Tệp khách hàng' },
   broadcast: { icon: '📢', label: 'Chiến dịch' },

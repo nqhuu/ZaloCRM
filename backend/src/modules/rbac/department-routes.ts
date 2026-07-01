@@ -47,6 +47,7 @@ export async function registerDepartmentRoutes(app: FastifyInstance): Promise<vo
     if (!user) return reply.status(401).send({ error: 'unauthorized' });
     const body = (request.body ?? {}) as {
       name?: string;
+      legacyDepartmentCode?: string | null;
       parentId?: string | null;
       displayOrder?: number;
       defaultArchiveRecordType?: string;
@@ -55,6 +56,7 @@ export async function registerDepartmentRoutes(app: FastifyInstance): Promise<vo
       const dept = await createDepartment({
         orgId: user.orgId,
         name: body.name ?? '',
+        legacyDepartmentCode: body.legacyDepartmentCode,
         parentId: body.parentId ?? null,
         displayOrder: body.displayOrder,
         defaultArchiveRecordType: body.defaultArchiveRecordType,
@@ -72,6 +74,7 @@ export async function registerDepartmentRoutes(app: FastifyInstance): Promise<vo
     const { id } = request.params as { id: string };
     const body = (request.body ?? {}) as {
       name?: string;
+      legacyDepartmentCode?: string | null;
       parentId?: string | null;
       displayOrder?: number;
       defaultArchiveRecordType?: string;
@@ -81,6 +84,7 @@ export async function registerDepartmentRoutes(app: FastifyInstance): Promise<vo
         orgId: user.orgId,
         id,
         name: body.name,
+        legacyDepartmentCode: body.legacyDepartmentCode,
         parentId: body.parentId,
         displayOrder: body.displayOrder,
         defaultArchiveRecordType: body.defaultArchiveRecordType,

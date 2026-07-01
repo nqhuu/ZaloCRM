@@ -145,19 +145,57 @@ Them `Message.nativeZaloMessageId nullable`. Nhieu dong Message quan sat qua
 nhieu nick co the tro toi cung mot `NativeZaloMessage`. Phase dau khong can xoa
 cac Message theo nick.
 
-## 5. Xac dinh Zalo user/group la khach hang
+## 5. Xac dinh khach hang B2B, contact va Zalo channel
+
+### 5.0. Dinh nghia lai ranh gioi nghiep vu
+
+Cong ty dang ban hang B2B, vi vay `Khach hang` trong CRM khong nen dong nghia
+voi mot nick Zalo hoac mot `Contact`. Can tach ro ba lop:
+
+```text
+CustomerProfile = ho so khach hang/nghiep vu mua hang
+Contact         = nguoi lien he thuoc ho so khach hang
+Zalo user/group = kenh lien lac hoac ngu canh trao doi cua Contact/CustomerProfile
+```
+
+Voi khach hang doanh nghiep:
+
+```text
+CustomerProfile: Cong ty ABC
+- Contact 1: Giam doc
+- Contact 2: Ke toan
+- Contact 3: Ky thuat
+- Zalo group: Nhom ABC - Bao gia
+- Zalo group: DA ABC - Trien khai
+```
+
+Voi khach hang ca nhan, van tao `CustomerProfile` rieng:
+
+```text
+CustomerProfile: Nguyen Van A
+type: individual
+primary Contact: Nguyen Van A
+Zalo user: globalId cua Nguyen Van A
+```
+
+Do do `Contact` hien co trong CRM nen duoc hieu la nguoi lien he/dau moi
+Zalo, con `CustomerProfile` moi la khach hang nghiep vu dung cho ho so, don
+hang, bao cao va dong bo Google Sheet.
 
 ### 5.1. Nguon su that duy nhat
 
 Danh sach ho so khach hang duoc dong bo tu Google Sheet vao `CustomerProfile`.
-Mot Zalo user/group chi duoc xac dinh la khach hang sau khi duoc gan vao mot
-`CustomerProfile` da dong bo.
+Google Sheet la nguon master data dang song cua phong Kinh doanh, khong phai
+nguon import mot lan.
+
+Mot Zalo user/group chi duoc xac dinh la khach hang khi duoc gan vao mot
+`CustomerProfile`.
 
 ```text
 Google Sheet
 -> CustomerProfile
--> gan Zalo user hoac canonical Zalo group
--> doi tuong duoc xac dinh la khach hang
+-> gan Contact / Zalo user / canonical Zalo group
+-> doi tuong Zalo duoc phan loai la kenh khach hang
 ```
 
 Khong dung CRM tag, Zalo native label, ten nhom, noi dung tin nhan, so thanh
@@ -166,37 +204,69 @@ vien hoac viec nhieu nick cung nhom de ket luan doi tuong la khach hang.
 ### 5.2. Cardinality da chot
 
 ```text
+CustomerProfile 1 -> N Contacts
+Contact M -> N CustomerProfiles
 CustomerProfile 1 -> N canonical Zalo groups
-Canonical Zalo group N -> 1 CustomerProfile
-Zalo user M <-> N canonical Zalo groups
-Zalo user 0..1 -> 1 CustomerProfile truc tiep trong phase nay
+Canonical Zalo group N -> 1 CustomerProfile active
+Contact/Zalo user M <-> N canonical Zalo groups
+CustomerProfile 0..1 -> 1 primary Contact
 ```
 
 Quy tac:
 
-- Mot group chi thuoc mot ho so khach hang dang hieu luc.
-- Mot ho so khach hang co the co nhieu group.
-- Mot Zalo user co the tham gia nhieu group thuoc nhieu ho so khach hang khac nhau.
-- Mot Zalo user co the co ho so khach hang truc tiep cua rieng ho.
-- Ho so truc tiep cua user khong bi thay doi khi user tham gia group cua mot
-  khach hang khac.
+- Mot CustomerProfile co the la doanh nghiep hoac ca nhan.
+- Mot CustomerProfile doanh nghiep co nhieu Contact.
+- Mot Contact co thong tin ca nhan rieng: ngay sinh, so dien thoai, email,
+  chuc vu, vai tro mua hang, Zalo identity, ghi chu.
+- Mot Contact co the lien quan nhieu CustomerProfile trong truong hop dac biet.
+- Mot Contact co the dong thoi la nguoi lien he cua doanh nghiep A va co
+  CustomerProfile ca nhan rieng cua chinh ho.
+- Mot group chi thuoc mot CustomerProfile dang hieu luc.
+- Mot CustomerProfile co the co nhieu group.
+- Mot Zalo user co the tham gia nhieu group thuoc nhieu CustomerProfile khac nhau.
 - Membership trong group khong tao customer ownership truc tiep cho user.
 
 Vi du:
 
 ```text
-Zalo user Nguyen Van A
-- direct CustomerProfile: Cua hang ca nhan Nguyen Van A
+Contact Nguyen Van A
+- CustomerProfile ca nhan: Cua hang Nguyen Van A
+- Contact role trong Cong ty X: buyer
 - member cua group G1 -> CustomerProfile: Cong ty X
 - member cua group G2 -> CustomerProfile: Cong ty Y
 ```
 
-Nguyen Van A van la mot Zalo identity duy nhat, nhung tham gia ba customer
-contexts khac nhau.
+Nguyen Van A van la mot Contact/Zalo identity duy nhat, nhung tham gia nhieu
+customer contexts khac nhau.
 
 ### 5.3. Mo hinh lien ket customer
 
-Uu tien hai bang rieng de rang buoc ro hon mot polymorphic table:
+Them bang noi Contact voi CustomerProfile:
+
+```text
+CustomerProfileContact
+
+id
+orgId
+customerProfileId
+contactId
+role: legal_representative | decision_maker | buyer | accountant | technical | delivery | owner | staff | other
+title nullable
+department nullable
+isPrimary
+isActive
+rawText nullable
+source: google_sheet | manual | zalo_inference
+linkedByUserId nullable
+linkedAt
+unlinkedAt nullable
+```
+
+Uu tien dung bang nay thay cho viec coi mot Zalo user la khach hang truc tiep.
+Neu customer la ca nhan, tao `CustomerProfile.type=individual` va gan Contact do
+la primary contact.
+
+Lien ket group voi CustomerProfile:
 
 ```text
 CustomerProfileZaloGroup
@@ -217,21 +287,24 @@ Rang buoc nghiep vu/database:
 mot nativeGroupId chi co mot link active
 ```
 
+Lien ket Zalo user truc tiep nen di qua Contact:
+
 ```text
 CustomerProfileZaloUser
 
 id
 orgId
 customerProfileId
-zaloUserIdentityId
+contactId
 linkedByUserId
 linkedAt
 unlinkedAt nullable
 source: google_sheet_assignment | manual_assignment
 ```
 
-Trong phase nay, mot `zaloUserIdentityId` chi co mot direct customer link active.
-Lich su link cu duoc giu bang `unlinkedAt`, khong hard delete.
+Trong phase tiep theo nen doi ten/di chuyen y nghia bang nay thanh
+`CustomerProfileContact` de dung B2B hon. Lich su link cu duoc giu bang
+`unlinkedAt`, khong hard delete.
 
 Membership group luu rieng:
 
@@ -253,13 +326,15 @@ duoc suy ra tu group khi xu ly hoi thoai group.
 
 ```text
 Hoi thoai 1:1 voi Zalo user
--> dung CustomerProfileZaloUser active cua user
+-> neu Contact chi gan mot CustomerProfile active thi goi y customer do
+-> neu Contact co CustomerProfile ca nhan thi goi y profile ca nhan
+-> neu Contact gan nhieu CustomerProfile thi UI can cho user chon
 
 Hoi thoai group
 -> dung CustomerProfileZaloGroup active cua canonical group
 ```
 
-Trong group, khong dung direct customer profile cua nguoi gui de gan ho so. Vi
+Trong group, khong dung CustomerProfile ca nhan cua nguoi gui de gan ho so. Vi
 du Nguyen Van A nhan tin trong group Cong ty X thi tin do thuoc customer context
 Cong ty X, khong thuoc cua hang ca nhan Nguyen Van A.
 
@@ -277,16 +352,218 @@ Nho snapshot, doi/unlink mapping sau nay khong lam sai ho so lich su.
 
 ### 5.5. Luong dong bo va gan customer
 
-1. Dong bo Google Sheet va upsert CustomerProfile theo external key on dinh.
-2. Hien danh sach Zalo user/group chua gan.
-3. Manager tim theo globalId, ten, so dien thoai hoac group globalId.
-4. Gan user/group vao CustomerProfile.
-5. Backend kiem tra unique active link truoc khi luu.
-6. Neu group da thuoc profile khac, bat buoc dung luong chuyen link co xac nhan.
-7. Ghi audit profile cu, profile moi, nguoi thuc hien, ly do va thoi diem.
+1. Dong bo Google Sheet va upsert CustomerProfile theo `Ma khach hang`.
+2. Map cac legacy code nhu NVKD, bo phan, loai hinh sang bang CRM noi bo.
+3. Hien danh sach CustomerProfile tu sheet.
+4. Tu CustomerProfile, gan Contacts va canonical Zalo groups lien quan.
+5. Hien danh sach Zalo user/group chua gan de manager xu ly.
+6. Manager tim theo ma khach hang, ten, so dien thoai, globalId, group globalId.
+7. Gan Contact/user/group vao CustomerProfile.
+8. Backend kiem tra unique active group link truoc khi luu.
+9. Neu group da thuoc profile khac, bat buoc dung luong chuyen link co xac nhan.
+10. Ghi audit profile cu, profile moi, nguoi thuc hien, ly do va thoi diem.
 
 User/group chua co active customer link van la doi tuong Zalo hop le trong CRM,
 nhung khong duoc tu dong coi la khach hang.
+
+### 5.6. Du lieu Google Sheet khach hang B2B
+
+Bang khach hang hien tai cua phong Kinh doanh co dang master data cap doanh
+nghiep. Mot dong sheet la mot CustomerProfile.
+
+Mapping de xuat:
+
+| Cot Google Sheet | Field CRM |
+|---|---|
+| Ma khach hang | `CustomerProfile.externalKey` / `code` |
+| Ten khach hang | `CustomerProfile.name` |
+| Ten viet tat | `CustomerProfile.shortName` / aliases |
+| Dia phuong | `CustomerProfile.provinceOrRegion` |
+| Van phong giao dich | `CustomerProfile.officeAddress` |
+| MST/DT | `taxCode` hoac `mainPhone`, can rule tach |
+| Dai dien phap luat | `legalRepresentativeRaw`, co the tao Contact role `legal_representative` |
+| Ngay hoat dong | `activeSince` / `establishedDate` |
+| Dia chi giao/nhan hang | `shippingAddress` |
+| Web | `website` |
+| Nguoi lien he | raw contact hint, dung de goi y/tao Contact |
+| Bo phan quan ly | `managingDepartmentCodeSnapshot` va map sang Department |
+| NVKD phu trach | `salesOwnerCodeSnapshot` va map sang User |
+| Loai hinh | `customerTypeCodeSnapshot` va map sang CustomerType |
+| Ngay giao dich dau tien | `firstTransactionDate` |
+
+De xuat mo rong `CustomerProfile`:
+
+```text
+CustomerProfile
+
+id
+orgId
+externalKey              // Ma khach hang tu sheet
+code                     // ma hien thi, co the trung externalKey
+name
+shortName nullable
+type: business | individual
+taxCode nullable
+mainPhone nullable
+website nullable
+provinceOrRegion nullable
+officeAddress nullable
+shippingAddress nullable
+legalRepresentativeRaw nullable
+activeSince nullable
+firstTransactionDate nullable
+
+ownerUserId nullable
+salesOwnerCodeSnapshot nullable
+managingDepartmentId nullable
+managingDepartmentCodeSnapshot nullable
+customerTypeId nullable
+customerTypeCodeSnapshot nullable
+
+source: google_sheet | manual
+metadata
+syncedAt nullable
+missingFromSource Boolean
+sourceMissingSince nullable
+```
+
+Khong xoa CustomerProfile khi row bien mat khoi sheet. Chi danh dau
+`missingFromSource=true` de admin review, vi sheet co the bi xoa nham.
+
+### 5.7. Legacy code tu Google Sheet
+
+`DA01`, `BPKD`, `LDL0`, `LDVN` la ma nghiep vu legacy do phong Kinh doanh dang
+dung trong Google Sheet. Chung khong phai ID noi bo cua CRM va khong nen dung
+lam primary key.
+
+CRM can luu ca ID noi bo va code snapshot:
+
+```text
+User.id                 = UUID noi bo CRM
+User.legacyEmployeeCode = DA01
+
+Department.id                   = UUID noi bo CRM
+Department.legacyDepartmentCode = BPKD
+
+CustomerType.id   = UUID noi bo CRM
+CustomerType.code = LDL0 / LDVN
+```
+
+Khi dong bo sheet:
+
+```text
+NVKD phu trach = DA01
+-> tim User.legacyEmployeeCode = DA01
+-> neu co: CustomerProfile.ownerUserId = User.id
+-> luon luu salesOwnerCodeSnapshot = DA01
+
+Bo phan quan ly = BPKD
+-> tim Department.legacyDepartmentCode = BPKD
+-> neu co: CustomerProfile.managingDepartmentId = Department.id
+-> luon luu managingDepartmentCodeSnapshot = BPKD
+
+Loai hinh = LDL0
+-> tim CustomerType.code = LDL0
+-> neu co: CustomerProfile.customerTypeId = CustomerType.id
+-> luon luu customerTypeCodeSnapshot = LDL0
+```
+
+Neu chua map duoc code, van import CustomerProfile nhung can hien canh bao
+`unmappedSalesCode`, `unmappedDepartmentCode`, `unmappedCustomerTypeCode`.
+Admin co the vao man mapping de gan code voi User/Department/CustomerType, sau
+do chay lai reconcile.
+
+### 5.8. Workflow dong bo Google Sheet
+
+Google Sheet la nguon master data song, nen can ho tro ca dong bo thu cong va
+dinh ky. Hai cach chay dung chung mot engine:
+
+```text
+runCustomerSheetSync(sourceId, triggerType: manual | scheduled)
+```
+
+Bang cau hinh nguon:
+
+```text
+CustomerDataSource
+
+id
+orgId
+name
+dataType: customer_master | order_report | sales_report | receivable_report | other
+provider: google_sheet
+spreadsheetId
+sheetName
+range nullable
+headerRow
+enabled
+syncMode: manual | scheduled
+scheduleCron nullable
+lastSyncedAt nullable
+lastSyncStatus nullable
+lastSyncError nullable
+createdByUserId
+createdAt
+updatedAt
+```
+
+Bang mapping cot:
+
+```text
+CustomerDataSourceColumnMap
+
+id
+sourceId
+targetField
+sourceHeader
+transformRule nullable
+required
+```
+
+Bang log moi lan sync:
+
+```text
+CustomerSyncRun
+
+id
+sourceId
+startedAt
+finishedAt nullable
+triggerType: manual | scheduled
+status: running | success | partial | failed
+totalRows
+createdCount
+updatedCount
+skippedCount
+errorCount
+```
+
+Bang loi tung dong:
+
+```text
+CustomerSyncRowError
+
+id
+runId
+rowNumber
+externalKey nullable
+errorType
+message
+rawRow
+```
+
+UI de xuat:
+
+- Man `Nguon khach hang`: cau hinh spreadsheet, sheet, range, lich sync.
+- Man mapping cot: auto-detect theo header tieng Viet, cho sua thu cong.
+- Preview 5-20 dong dau truoc khi sync.
+- Nut `Dong bo ngay`.
+- Lich su sync: so dong tao/cap nhat/bo qua/loi.
+- Bo loc `ma chua map`: NVKD, bo phan, loai hinh.
+
+Trong giai doan dau chi xu ly `dataType=customer_master`. Cac sheet bao cao
+doanh so, don hang, cong no se dung engine nguon du lieu tuong tu nhung map vao
+bang nghiep vu khac.
 
 ## 6. CRM tag doc lap voi Zalo native label
 
@@ -583,10 +860,22 @@ POST  /api/v1/native-zalo-groups/sync
 
 GET    /api/v1/customer-profiles
 POST   /api/v1/customer-profiles/sync-google-sheet
+GET    /api/v1/customer-data-sources
+POST   /api/v1/customer-data-sources
+PATCH  /api/v1/customer-data-sources/:id
+POST   /api/v1/customer-data-sources/:id/sync
+GET    /api/v1/customer-data-sources/:id/sync-runs
+GET    /api/v1/customer-sync-runs/:id/errors
+GET    /api/v1/customer-types
+POST   /api/v1/customer-types
+PATCH  /api/v1/customer-types/:id
 POST   /api/v1/customer-profiles/:id/zalo-groups
 DELETE /api/v1/customer-profiles/:id/zalo-groups/:nativeGroupId
+POST   /api/v1/customer-profiles/:id/contacts
+PATCH  /api/v1/customer-profiles/:id/contacts/:contactId
+DELETE /api/v1/customer-profiles/:id/contacts/:contactId
 POST   /api/v1/customer-profiles/:id/zalo-users
-DELETE /api/v1/customer-profiles/:id/zalo-users/:zaloUserIdentityId
+DELETE /api/v1/customer-profiles/:id/zalo-users/:contactId
 ```
 
 Filter query:
@@ -629,6 +918,25 @@ Quoc Huu
 Dialog phan cong cho phep chon CustomerProfile, CRM tags workload, owner,
 collaborators va ly do trong mot lan luu. CustomerProfile va CRM tag van la hai
 quan he rieng duoc ghi trong cung transaction.
+
+Man CustomerProfile de xuat:
+
+- Tab `Tong quan`: master data tu Google Sheet, ma khach hang, loai hinh, sale,
+  bo phan, dia chi, MST, ngay giao dich dau tien.
+- Tab `Nguoi lien he`: Contact thuoc khach hang, vai tro, chuc vu, sinh nhat,
+  Zalo identity, so dien thoai, email.
+- Tab `Zalo`: canonical groups va Zalo users/contacts da gan.
+- Tab `Ho so luu`: ArchiveStory theo customer context.
+- Tab `Don hang`: de phase sau lien ket order/report sheet.
+- Tab `Phan cong`: owner/collaborator/watcher theo customer hoac subject Zalo.
+
+Man `Contacts` hien tai nen duoc hieu la `Lien he Zalo`. Neu giu ten UI
+`Khach hang` trong giai doan chuyen tiep, can them tab/nhan de phan biet:
+
+```text
+Khach hang doanh nghiep / Ho so khach hang = CustomerProfile
+Lien he / Zalo user                       = Contact
+```
 
 ## 15. Audit va bao cao
 
@@ -689,13 +997,20 @@ Bao cao tach ro:
 3. Doi archive preflight sang native identity.
 4. Test hai user luu dong thoi.
 
-### Phase C - Customer linking va independent CRM tag
+### Phase C - Customer master data, contact linking va independent CRM tag
 
-1. Them CustomerProfileZaloGroup va CustomerProfileZaloUser.
-2. Them NativeZaloGroupMember de tach membership khoi customer ownership.
-3. Them ZaloUserCrmTag va NativeZaloGroupCrmTag.
-4. Dung mirror native label sang CRM tag.
-5. Them sync Google Sheet va queue Chua gan ho so khach hang.
+1. Mo rong CustomerProfile theo huong B2B account: type, shortName, taxCode,
+   legacy code snapshots, ownerUserId, managingDepartmentId, customerTypeId.
+2. Them CustomerProfileContact de mot khach hang co nhieu nguoi lien he.
+3. Them CustomerType va legacy code mapping cho User/Department/CustomerType.
+4. Them CustomerDataSource, ColumnMap, SyncRun va RowError.
+5. Them sync Google Sheet thu cong va dinh ky cho `customer_master`.
+6. Them CustomerProfileZaloGroup va giai doan chuyen tiep CustomerProfileZaloUser
+   theo `contactId`.
+7. Them NativeZaloGroupMember de tach membership khoi customer ownership.
+8. Them ZaloUserCrmTag va NativeZaloGroupCrmTag.
+9. Dung mirror native label sang CRM tag.
+10. Them queue Chua gan ho so khach hang va queue ma legacy chua map.
 
 ### Phase D - Work assignment
 
@@ -713,6 +1028,17 @@ Bao cao tach ro:
 
 ## 18. Tieu chi nghiem thu
 
+- Google Sheet customer master upsert CustomerProfile theo `Ma khach hang`, khong
+  tao trung khi sync lai.
+- Dong bo co the chay thu cong va dinh ky bang cung sync engine.
+- Moi lan sync co SyncRun, so dong tao/cap nhat/bo qua/loi va row error.
+- Row mat khoi sheet khong bi xoa khoi CRM, chi danh dau missingFromSource.
+- `DA01`, `BPKD`, `LDL0/LDVN` duoc luu snapshot va map sang User/Department/
+  CustomerType neu co legacy code tuong ung.
+- Code legacy chua map khong chan import CustomerProfile, nhung phai hien canh bao.
+- Mot CustomerProfile doanh nghiep co nhieu Contact voi vai tro/chuc vu rieng.
+- Mot Contact co the thuoc nhieu CustomerProfile va co the co CustomerProfile ca
+  nhan rieng.
 - Hai nick co groupId khac va globalId giong chi tao mot NativeZaloGroup.
 - Moi nick goi API bang accountScopedGroupId cua minh.
 - Cung zaloMsgId trong nhom chung la cung native message.
@@ -723,9 +1049,10 @@ Bao cao tach ro:
 - Duoc gan workload/tag nhung khong co account access thi khong doc/chat duoc.
 - Primary/secondary loc nhom theo CRM tag va assignment.
 - Mot group khong co hai active CustomerProfile link.
-- Mot user co direct profile rieng va tham gia group cua profile khac ma khong
-  bi gop/chuyen nham customer context.
-- Tin nhan 1:1 dung direct user profile; tin nhan group dung group profile.
+- Mot Contact co profile ca nhan rieng va tham gia group cua CustomerProfile
+  doanh nghiep khac ma khong bi gop/chuyen nham customer context.
+- Tin nhan 1:1 goi y CustomerProfile theo Contact mapping; tin nhan group dung
+  group profile.
 - Ban giao giu source account va doi handling account ro rang.
 - Nick roi nhom khong con la duong ban giao moi.
 - Khong suy dien quyen bac cau qua nhieu nhom/user.
@@ -733,17 +1060,22 @@ Bao cao tach ro:
 ## 19. Ket luan nghiep vu
 
 ```text
+CustomerProfile            = ho so khach hang nghiep vu/account B2B
+Contact                    = nguoi lien he, co thong tin ca nhan va Zalo identity
+CustomerProfileContact     = quan he Contact thuoc khach hang nao, vai tro gi
+Google Sheet customer row  = nguon master data tao/cap nhat CustomerProfile
+legacy business code       = ma doi soat sheet, khong phai ID noi bo CRM
 GroupInfo.globalId          = danh tinh nhom chung
 accountScopedGroupId        = dia chi goi Zalo API theo tung nick
 groupGlobalId + zaloMsgId   = danh tinh tin nhan native
-active CustomerProfile link = user/group co phai khach hang hay khong
+active CustomerProfile link = group/contact/Zalo channel dang thuoc khach hang nao
 group membership            = user dang tham gia customer context nao
 CRM tag                     = loc workload noi bo, doc lap native label
 work assignment             = ai duoc manager giao xu ly user/group
 account access              = user co the doc/chat bang nick nao
 ```
 
-Khong dung mot field/tag de thay the tat ca cac lop tren. Tach ro danh tinh,
-customer ownership, group membership, dieu phoi cong viec va quyen truy cap
-giup tranh trung/gan nham ho so ma van ho tro primary/secondary quan ly nhieu
-user/group theo CRM tag mot cach de hieu.
+Khong dung mot field/tag de thay the tat ca cac lop tren. Tach ro ho so khach
+hang, nguoi lien he, danh tinh Zalo, customer ownership, group membership, dieu
+phoi cong viec va quyen truy cap giup tranh trung/gan nham ho so ma van ho tro
+primary/secondary quan ly nhieu user/group theo CRM tag mot cach de hieu.

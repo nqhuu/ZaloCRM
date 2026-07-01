@@ -177,6 +177,7 @@ export async function zaloRoutes(app: FastifyInstance): Promise<void> {
           where: { id },
           data: {
             status: 'deleted',
+            zaloUid: null,
             sessionData: Prisma.JsonNull,
             proxyUrl: null,
             deletedAt,

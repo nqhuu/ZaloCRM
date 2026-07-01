@@ -24,6 +24,7 @@ export const RESOURCES = [
   'permission_group',   // Quản lý quyền
   'conversation',       // Hội thoại
   'contact',            // Khách hàng
+  'customer_source',    // Nguồn đồng bộ hồ sơ khách hàng
   'friend',             // Friends (Zalo per-account)
   'customer_list',      // Tệp KH
   'broadcast',          // Chiến dịch
@@ -47,6 +48,7 @@ export const RESOURCE_ACTIONS: Record<Resource, readonly Action[]> = {
   permission_group: ['access', 'create', 'edit', 'delete'],
   conversation: ['access', 'edit', 'delete', 'view_all'],
   contact: ['access', 'create', 'edit', 'delete', 'view_all'],
+  customer_source: ['access', 'create', 'edit', 'delete', 'view_all'],
   friend: ['access', 'create', 'edit', 'delete', 'view_all'],
   customer_list: ['access', 'create', 'edit', 'delete', 'approve', 'view_all'],
   broadcast: ['access', 'create', 'edit', 'delete', 'approve', 'view_all'],
@@ -145,6 +147,7 @@ export const DEFAULT_PERMISSION_GROUPS = [
       conversation: viewAll('conversation'),
       archive: viewAll('archive'),
       contact: viewAll('contact'),
+      customer_source: viewAll('customer_source'),
       friend: viewAll('friend'),
       customer_list: { access: true, view_all: true, create: true, edit: true, approve: true },
       broadcast: { access: true, view_all: true, create: true, edit: true, approve: true },
@@ -167,6 +170,7 @@ export const DEFAULT_PERMISSION_GROUPS = [
       conversation: { access: true, edit: true, delete: true, view_all: true }, // view_all trong scope dept
       archive: { access: true, create: true, edit: true, delete: true, approve: true, view_all: true },
       contact: fullCrud('contact'),
+      customer_source: fullCrud('customer_source'),
       friend: fullCrud('friend'),
       customer_list: { access: true, create: true, edit: true, delete: true, approve: true, view_all: true },
       broadcast: { access: true, create: true, edit: true, delete: true, approve: true, view_all: true },

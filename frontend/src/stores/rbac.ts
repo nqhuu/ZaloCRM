@@ -14,6 +14,7 @@ import { api } from '@/api/index';
 export interface DepartmentNode {
   id: string;
   name: string;
+  legacyDepartmentCode: string | null;
   parentId: string | null;
   path: string;
   depth: number;
@@ -41,6 +42,7 @@ export interface RbacUser {
   id: string;
   email: string;
   fullName: string;
+  legacyEmployeeCode: string | null;
   role: string;
   permissionGroupId: string | null;
   permissionGroup: { id: string; name: string; isSystem: boolean } | null;
@@ -96,8 +98,12 @@ export const useRbacStore = defineStore('rbac', {
         this.loading = false;
       }
     },
-    async createDepartment(input: { name: string; parentId: string | null }) {
+    async createDepartment(input: { name: string; legacyDepartmentCode?: string | null; parentId: string | null }) {
       await api.post('/departments', input);
+      await this.loadDepartments();
+    },
+    async updateDepartmentLegacyCode(id: string, legacyDepartmentCode: string | null) {
+      await api.patch(`/departments/${id}`, { legacyDepartmentCode });
       await this.loadDepartments();
     },
     async renameDepartment(id: string, name: string) {

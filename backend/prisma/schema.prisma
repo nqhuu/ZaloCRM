@@ -86,6 +86,11 @@ model Organization {
   nativeZaloGroups              NativeZaloGroup[]
   nativeZaloMessages            NativeZaloMessage[]
   customerProfiles              CustomerProfile[]
+  customerTypes                 CustomerType[]
+  customerDataSources           CustomerDataSource[]
+  customerSyncRuns              CustomerSyncRun[]
+  customerSourceSnapshots       CustomerSourceSnapshot[]
+  customerProfileContacts       CustomerProfileContact[]
   zaloSubjectWorkAssignments    ZaloSubjectWorkAssignment[]
 
   @@map("organizations")
@@ -112,6 +117,7 @@ model User {
   email                        String               @unique
   passwordHash                 String               @map("password_hash")
   fullName                     String               @map("full_name")
+  legacyEmployeeCode           String?              @map("legacy_employee_code")
   // RBAC Phase Phân Quyền 2026-05-21: legacy `role` còn giữ cho dual-read window 2 tuần,
   // mã mới đọc `permissionGroupId`. Sau migration verify OK (~2 tuần) → drop legacy column.
   role                         String               @default("member") // legacy: owner, admin, member
@@ -184,7 +190,13 @@ model User {
   zaloPrimaryDelegationsCreated    ZaloAccountPrimaryDelegation[]     @relation("ZaloPrimaryDelegationCreatedBy")
   zaloPrimaryDelegationsCancelled  ZaloAccountPrimaryDelegation[]     @relation("ZaloPrimaryDelegationCancelledBy")
   zaloSubjectWorkAssignments       ZaloSubjectWorkAssignment[]        @relation("ZaloSubjectWorkAssignedUser")
+  ownedCustomerProfiles            CustomerProfile[]                  @relation("CustomerProfileOwner")
+  createdCustomerDataSources       CustomerDataSource[]               @relation("CustomerDataSourceCreatedBy")
+  archivedCustomerDataSources      CustomerDataSource[]               @relation("CustomerDataSourceArchivedBy")
+  triggeredCustomerSyncRuns        CustomerSyncRun[]                  @relation("CustomerSyncRunTriggeredBy")
+  linkedCustomerProfileContacts    CustomerProfileContact[]           @relation("CustomerProfileContactLinkedBy")
 
+  @@index([orgId, legacyEmployeeCode])
   @@map("users")
 }
 
@@ -432,24 +444,25 @@ model Contact {
   totalOutbound     Int @default(0) @map("total_outbound")
   totalAppointments Int @default(0) @map("total_appointments")
 
-  org                    Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  assignedUser           User?                       @relation("AssignedContacts", fields: [assignedUserId], references: [id])
-  mergedIntoContact      Contact?                    @relation("ContactMerge", fields: [mergedInto], references: [id])
-  mergedFrom             Contact[]                   @relation("ContactMerge")
-  parent                 Contact?                    @relation("ContactFather", fields: [parentContactId], references: [id], onDelete: SetNull)
-  children               Contact[]                   @relation("ContactFather")
-  statusRef              Status?                     @relation(fields: [statusId], references: [id], onDelete: SetNull)
-  conversations          Conversation[]
-  appointments           Appointment[]
-  attempts               FriendshipAttempt[]
-  friends                Friend[]
-  contactNotes           Note[]
+  org                     Organization                @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assignedUser            User?                       @relation("AssignedContacts", fields: [assignedUserId], references: [id])
+  mergedIntoContact       Contact?                    @relation("ContactMerge", fields: [mergedInto], references: [id])
+  mergedFrom              Contact[]                   @relation("ContactMerge")
+  parent                  Contact?                    @relation("ContactFather", fields: [parentContactId], references: [id], onDelete: SetNull)
+  children                Contact[]                   @relation("ContactFather")
+  statusRef               Status?                     @relation(fields: [statusId], references: [id], onDelete: SetNull)
+  conversations           Conversation[]
+  appointments            Appointment[]
+  attempts                FriendshipAttempt[]
+  friends                 Friend[]
+  contactNotes            Note[]
   // Phase 7 — Automation framework
-  automationTasks        AutomationTask[]
-  customerProfileLink    CustomerProfileZaloUser?
-  nativeGroupMemberships NativeZaloGroupMember[]
-  zaloUserCrmTags        ZaloUserCrmTag[]
-  zaloWorkAssignments    ZaloSubjectWorkAssignment[]
+  automationTasks         AutomationTask[]
+  customerProfileLink     CustomerProfileZaloUser?
+  customerProfileContacts CustomerProfileContact[]
+  nativeGroupMemberships  NativeZaloGroupMember[]
+  zaloUserCrmTags         ZaloUserCrmTag[]
+  zaloWorkAssignments     ZaloSubjectWorkAssignment[]
 
   // Per-Contact counters (cache from Friend rows; updated by friend-aggregate hooks)
   acceptedNicksCount Int @default(0) @map("accepted_nicks_count")
@@ -745,28 +758,107 @@ model NativeZaloGroupMember {
 // Customer records imported from Google Sheets. Contact remains the canonical
 // Zalo person identity; customer ownership is represented by explicit links.
 model CustomerProfile {
-  id          String    @id @default(uuid())
-  orgId       String    @map("org_id")
-  externalKey String    @map("external_key")
-  code        String?
-  name        String
-  phone       String?
-  email       String?
-  source      String    @default("google_sheet")
-  metadata    Json      @default("{}")
-  syncedAt    DateTime? @map("synced_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id                             String    @id @default(uuid())
+  orgId                          String    @map("org_id")
+  externalKey                    String    @map("external_key")
+  code                           String?
+  name                           String
+  shortName                      String?   @map("short_name")
+  type                           String    @default("business")
+  phone                          String?
+  email                          String?
+  taxCode                        String?   @map("tax_code")
+  mainPhone                      String?   @map("main_phone")
+  website                        String?
+  provinceOrRegion               String?   @map("province_or_region")
+  officeAddress                  String?   @map("office_address")
+  shippingAddress                String?   @map("shipping_address")
+  legalRepresentativeRaw         String?   @map("legal_representative_raw")
+  activeSince                    DateTime? @map("active_since")
+  firstTransactionDate           DateTime? @map("first_transaction_date")
+  ownerUserId                    String?   @map("owner_user_id")
+  salesOwnerCodeSnapshot         String?   @map("sales_owner_code_snapshot")
+  managingDepartmentId           String?   @map("managing_department_id")
+  managingDepartmentCodeSnapshot String?   @map("managing_department_code_snapshot")
+  customerTypeId                 String?   @map("customer_type_id")
+  customerTypeCodeSnapshot       String?   @map("customer_type_code_snapshot")
+  source                         String    @default("google_sheet")
+  sourceId                       String?   @map("source_id")
+  sourceRowNumber                Int?      @map("source_row_number")
+  metadata                       Json      @default("{}")
+  syncedAt                       DateTime? @map("synced_at")
+  missingFromSource              Boolean   @default(false) @map("missing_from_source")
+  sourceMissingSince             DateTime? @map("source_missing_since")
+  createdAt                      DateTime  @default(now()) @map("created_at")
+  updatedAt                      DateTime  @updatedAt @map("updated_at")
 
-  org            Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  zaloGroups     CustomerProfileZaloGroup[]
-  zaloUsers      CustomerProfileZaloUser[]
-  archiveStories ArchiveStory[]
+  org                Organization               @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ownerUser          User?                      @relation("CustomerProfileOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  managingDepartment Department?                @relation(fields: [managingDepartmentId], references: [id], onDelete: SetNull)
+  customerType       CustomerType?              @relation(fields: [customerTypeId], references: [id], onDelete: SetNull)
+  sourceDataSource   CustomerDataSource?        @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  contacts           CustomerProfileContact[]
+  zaloGroups         CustomerProfileZaloGroup[]
+  zaloUsers          CustomerProfileZaloUser[]
+  archiveStories     ArchiveStory[]
 
   @@unique([orgId, externalKey])
   @@index([orgId, name])
   @@index([orgId, code])
+  @@index([orgId, type])
+  @@index([orgId, ownerUserId])
+  @@index([orgId, managingDepartmentId])
+  @@index([orgId, customerTypeId])
+  @@index([sourceId, sourceRowNumber])
+  @@index([orgId, missingFromSource])
   @@map("customer_profiles")
+}
+
+model CustomerType {
+  id          String   @id @default(uuid())
+  orgId       String   @map("org_id")
+  code        String
+  name        String
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customerProfiles CustomerProfile[]
+
+  @@unique([orgId, code])
+  @@index([orgId, isActive])
+  @@map("customer_types")
+}
+
+model CustomerProfileContact {
+  id                String    @id @default(uuid())
+  orgId             String    @map("org_id")
+  customerProfileId String    @map("customer_profile_id")
+  contactId         String    @map("contact_id")
+  role              String    @default("other")
+  title             String?
+  department        String?
+  isPrimary         Boolean   @default(false) @map("is_primary")
+  isActive          Boolean   @default(true) @map("is_active")
+  rawText           String?   @map("raw_text")
+  source            String    @default("manual")
+  linkedByUserId    String?   @map("linked_by_user_id")
+  linkedAt          DateTime  @default(now()) @map("linked_at")
+  unlinkedAt        DateTime? @map("unlinked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  org             Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  contact         Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  linkedBy        User?           @relation("CustomerProfileContactLinkedBy", fields: [linkedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([customerProfileId, contactId])
+  @@index([orgId, contactId])
+  @@index([orgId, customerProfileId, isActive])
+  @@map("customer_profile_contacts")
 }
 
 model CustomerProfileZaloGroup {
@@ -787,20 +879,151 @@ model CustomerProfileZaloGroup {
 }
 
 model CustomerProfileZaloUser {
-  id                String   @id @default(uuid())
-  orgId             String   @map("org_id")
-  customerProfileId String   @map("customer_profile_id")
-  contactId         String   @unique @map("contact_id")
-  linkedByUserId    String   @map("linked_by_user_id")
-  source            String   @default("manual_assignment")
-  linkedAt          DateTime @default(now()) @map("linked_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                         String   @id @default(uuid())
+  orgId                      String   @map("org_id")
+  customerProfileId          String   @map("customer_profile_id")
+  contactId                  String   @unique @map("contact_id")
+  linkedByUserId             String   @map("linked_by_user_id")
+  source                     String   @default("manual_assignment")
+  contactDisplayNameSnapshot String?  @map("contact_display_name_snapshot")
+  zaloDisplayNameSnapshot    String?  @map("zalo_display_name_snapshot")
+  phoneSnapshot              String?  @map("phone_snapshot")
+  zaloGlobalIdSnapshot       String?  @map("zalo_global_id_snapshot")
+  zaloUsernameSnapshot       String?  @map("zalo_username_snapshot")
+  linkedAt                   DateTime @default(now()) @map("linked_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
 
   customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
   contact         Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([orgId, customerProfileId])
   @@map("customer_profile_zalo_users")
+}
+
+model CustomerDataSource {
+  id               String    @id @default(uuid())
+  orgId            String    @map("org_id")
+  name             String
+  dataType         String    @default("customer_master") @map("data_type")
+  provider         String    @default("google_sheet")
+  spreadsheetId    String    @map("spreadsheet_id")
+  sheetName        String    @map("sheet_name")
+  range            String?
+  headerRow        Int       @default(1) @map("header_row")
+  enabled          Boolean   @default(true)
+  syncMode         String    @default("manual") @map("sync_mode")
+  scheduleCron     String?   @map("schedule_cron")
+  lastSyncedAt     DateTime? @map("last_synced_at")
+  lastSyncStatus   String?   @map("last_sync_status")
+  lastSyncError    String?   @map("last_sync_error")
+  createdByUserId  String?   @map("created_by_user_id")
+  archivedAt       DateTime? @map("archived_at")
+  archivedByUserId String?   @map("archived_by_user_id")
+  archiveReason    String?   @map("archive_reason")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  org              Organization                  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy        User?                         @relation("CustomerDataSourceCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  archivedBy       User?                         @relation("CustomerDataSourceArchivedBy", fields: [archivedByUserId], references: [id], onDelete: SetNull)
+  columnMaps       CustomerDataSourceColumnMap[]
+  syncRuns         CustomerSyncRun[]
+  snapshots        CustomerSourceSnapshot[]
+  customerProfiles CustomerProfile[]
+
+  @@index([orgId, dataType, enabled])
+  @@index([orgId, archivedAt, updatedAt])
+  @@map("customer_data_sources")
+}
+
+model CustomerDataSourceColumnMap {
+  id            String   @id @default(uuid())
+  sourceId      String   @map("source_id")
+  targetField   String   @map("target_field")
+  sourceHeader  String   @map("source_header")
+  transformRule String?  @map("transform_rule")
+  required      Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  source CustomerDataSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetField])
+  @@index([sourceId, sourceHeader])
+  @@map("customer_data_source_column_maps")
+}
+
+model CustomerSyncRun {
+  id                String    @id @default(uuid())
+  orgId             String    @map("org_id")
+  sourceId          String    @map("source_id")
+  triggerType       String    @map("trigger_type")
+  status            String    @default("running")
+  startedAt         DateTime  @default(now()) @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  totalRows         Int       @default(0) @map("total_rows")
+  createdCount      Int       @default(0) @map("created_count")
+  updatedCount      Int       @default(0) @map("updated_count")
+  skippedCount      Int       @default(0) @map("skipped_count")
+  errorCount        Int       @default(0) @map("error_count")
+  triggeredByUserId String?   @map("triggered_by_user_id")
+  summary           Json      @default("{}")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  org         Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  source      CustomerDataSource       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  triggeredBy User?                    @relation("CustomerSyncRunTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+  rowErrors   CustomerSyncRowError[]
+  snapshots   CustomerSourceSnapshot[]
+
+  @@index([orgId, startedAt])
+  @@index([sourceId, startedAt])
+  @@map("customer_sync_runs")
+}
+
+model CustomerSourceSnapshot {
+  id                       String    @id @default(uuid())
+  orgId                    String    @map("org_id")
+  sourceId                 String    @map("source_id")
+  syncRunId                String    @map("sync_run_id")
+  sourceRowNumber          Int       @map("source_row_number")
+  sourceRowKey             String?   @map("source_row_key")
+  rawRow                   Json      @map("raw_row")
+  normalizedData           Json      @map("normalized_data")
+  rowHash                  String    @map("row_hash")
+  status                   String    @default("new")
+  action                   String    @default("no_op")
+  errorMessage             String?   @map("error_message")
+  matchedCustomerProfileId String?   @map("matched_customer_profile_id")
+  appliedAt                DateTime? @map("applied_at")
+  ignoredAt                DateTime? @map("ignored_at")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  org     Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  source  CustomerDataSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  syncRun CustomerSyncRun    @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, sourceId])
+  @@index([syncRunId, status])
+  @@index([sourceId, sourceRowKey])
+  @@map("customer_source_snapshots")
+}
+
+model CustomerSyncRowError {
+  id          String   @id @default(uuid())
+  runId       String   @map("run_id")
+  rowNumber   Int      @map("row_number")
+  externalKey String?  @map("external_key")
+  errorType   String   @map("error_type")
+  message     String
+  rawRow      Json     @map("raw_row")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  run CustomerSyncRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, rowNumber])
+  @@map("customer_sync_row_errors")
 }
 
 model ZaloUserCrmTag {
@@ -2670,6 +2893,7 @@ model Department {
   id                       String    @id @default(uuid())
   orgId                    String    @map("org_id")
   name                     String
+  legacyDepartmentCode     String?   @map("legacy_department_code")
   parentId                 String?   @map("parent_id")
   // Materialized path "/<rootId>/<midId>/<thisId>/" — query subtree bằng LIKE.
   // Auto recompute bởi trigger Postgres recompute_department_path() khi insert/update parent_id.
@@ -2689,8 +2913,10 @@ model Department {
   zaloAccounts             ZaloAccount[]
   archiveStatusDefinitions ArchiveStatusDefinition[]
   zaloPrimaryDelegations   ZaloAccountPrimaryDelegation[]
+  customerProfiles         CustomerProfile[]
 
   @@index([orgId, path])
+  @@index([orgId, legacyDepartmentCode])
   @@index([parentId])
   @@map("departments")
 }
