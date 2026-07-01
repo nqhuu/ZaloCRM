@@ -71,6 +71,61 @@
 
       <!-- ══════ TAB 1: HỒ SƠ ══════ -->
       <div v-show="activeTab === 'profile'" class="tab-pane">
+        <section v-if="customerContext" class="customer-context-preview">
+          <header>
+            <div class="customer-context-heading">
+              <span class="customer-context-icon">
+                <v-icon size="16">mdi-domain</v-icon>
+              </span>
+              <div>
+                <small>Khách hàng B2B</small>
+                <strong>{{ customerContext.customerProfile.name }}</strong>
+              </div>
+            </div>
+            <span class="customer-context-source">
+              <v-icon size="13">mdi-link-variant</v-icon>
+              {{ customerContext.sourceLabel }}
+            </span>
+          </header>
+
+          <div class="customer-context-code">
+            {{ customerContext.customerProfile.code || customerContext.customerProfile.externalKey }}
+            <span v-if="customerContext.customerProfile.shortName">
+              · {{ customerContext.customerProfile.shortName }}
+            </span>
+          </div>
+
+          <div class="customer-context-grid">
+            <div>
+              <span>Địa phương</span>
+              <strong>{{ customerContext.customerProfile.provinceOrRegion || 'Chưa có' }}</strong>
+            </div>
+            <div>
+              <span>Phụ trách</span>
+              <strong>{{ customerContext.customerProfile.ownerUser?.fullName || customerContext.customerProfile.salesOwnerCodeSnapshot || 'Chưa gán' }}</strong>
+            </div>
+            <div>
+              <span>Bộ phận</span>
+              <strong>{{ customerContext.customerProfile.managingDepartment?.name || customerContext.customerProfile.managingDepartmentCodeSnapshot || 'Chưa gán' }}</strong>
+            </div>
+            <div>
+              <span>Loại hình</span>
+              <strong>{{ customerContext.customerProfile.customerType?.name || customerContext.customerProfile.customerTypeCodeSnapshot || 'Chưa có' }}</strong>
+            </div>
+          </div>
+
+          <div class="customer-context-footer">
+            <div class="customer-context-stats">
+              <span><b>{{ customerContext.customerProfile._count.archiveStories }}</b> hồ sơ</span>
+              <span><b>{{ customerContext.customerProfile._count.contacts }}</b> liên hệ</span>
+            </div>
+            <button type="button" @click="openCustomerProfile">
+              Mở khách hàng
+              <v-icon size="14">mdi-arrow-right</v-icon>
+            </button>
+          </div>
+        </section>
+
         <!-- Inline form: collapsed (Tên Zalo + SĐT) hoặc expanded (full 9 rows). Auto-collapse sau 5s. -->
         <section class="ip-form" :class="{ collapsed: !infoExpanded }">
           <!-- Always visible: Tên Zalo -->
@@ -431,6 +486,58 @@ const emit = defineEmits<{
   'refresh-ai-sentiment': [];
 }>();
 
+type ChatCustomerContext = {
+  source: 'group' | 'direct_user' | 'direct_contact';
+  sourceLabel: string;
+  subjectId?: string | null;
+  subjectName?: string | null;
+  customerProfile: {
+    id: string;
+    code?: string | null;
+    externalKey: string;
+    name: string;
+    shortName?: string | null;
+    provinceOrRegion?: string | null;
+    salesOwnerCodeSnapshot?: string | null;
+    managingDepartmentCodeSnapshot?: string | null;
+    customerTypeCodeSnapshot?: string | null;
+    ownerUser?: { id: string; fullName: string } | null;
+    managingDepartment?: { id: string; name: string } | null;
+    customerType?: { id: string; code: string; name: string } | null;
+    _count: {
+      archiveStories: number;
+      contacts: number;
+      zaloGroups: number;
+      zaloUsers: number;
+    };
+  };
+};
+
+const customerContext = ref<ChatCustomerContext | null>(null);
+let customerContextRequest = 0;
+
+async function loadCustomerContext() {
+  const conversationId = props.conversationId;
+  const requestId = ++customerContextRequest;
+  customerContext.value = null;
+  if (!conversationId) return;
+  try {
+    const { data } = await api.get('/customer-profiles/conversation-context', {
+      params: { conversationId },
+    });
+    if (requestId !== customerContextRequest) return;
+    customerContext.value = data.context || null;
+  } catch {
+    if (requestId === customerContextRequest) customerContext.value = null;
+  }
+}
+
+function openCustomerProfile() {
+  const id = customerContext.value?.customerProfile.id;
+  if (!id) return;
+  void router.push(`/customers/${id}`);
+}
+
 const {
   form, saveSuccess, saveError,
   contactAppointments,
@@ -513,6 +620,7 @@ async function saveConfirmationSetting() {
 
 watch(() => props.conversationId, () => {
   void loadConfirmationSetting();
+  void loadCustomerContext();
 }, { immediate: true });
 
 const activeTab = ref<'profile' | 'relations' | 'activity' | 'score'>('profile');
@@ -1090,6 +1198,138 @@ function relativeTime(dateStr: string) {
   background: var(--smax-grey-100);
   padding: 0 4px; border-radius: 3px;
   font-size: 10.5px;
+}
+
+/* Customer profile preview — temporary validation UI for linked Zalo group/user. */
+.customer-context-preview {
+  border-bottom: 1px solid #bfdbfe;
+  background: #eff6ff;
+  padding: 11px 13px 10px;
+}
+.customer-context-preview > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.customer-context-heading {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+.customer-context-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  border-radius: 6px;
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.customer-context-heading div {
+  min-width: 0;
+}
+.customer-context-heading small,
+.customer-context-heading strong {
+  display: block;
+}
+.customer-context-heading small {
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.customer-context-heading strong {
+  margin-top: 1px;
+  color: #172554;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.customer-context-source {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 3px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #fff;
+  color: #1d4ed8;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.customer-context-code {
+  margin: 7px 0;
+  color: #475569;
+  font-size: 11px;
+}
+.customer-context-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid #bfdbfe;
+  border-left: 1px solid #bfdbfe;
+}
+.customer-context-grid div {
+  min-width: 0;
+  border-right: 1px solid #bfdbfe;
+  border-bottom: 1px solid #bfdbfe;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 6px 7px;
+}
+.customer-context-grid span,
+.customer-context-grid strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.customer-context-grid span {
+  color: #64748b;
+  font-size: 9.5px;
+  text-transform: uppercase;
+}
+.customer-context-grid strong {
+  margin-top: 2px;
+  color: #1e293b;
+  font-size: 11px;
+}
+.customer-context-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+.customer-context-stats {
+  display: flex;
+  gap: 8px;
+  color: #475569;
+  font-size: 10.5px;
+}
+.customer-context-stats b {
+  color: #1d4ed8;
+}
+.customer-context-footer button {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: #1d4ed8;
+  padding: 3px 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.customer-context-footer button:hover {
+  text-decoration: underline;
 }
 
 /* ════════ Inline form ════════ */

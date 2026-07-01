@@ -1335,15 +1335,345 @@ Muc tieu: tai lieu va UI khong con nham Contact voi CustomerProfile.
 - Nick roi group khong con la duong ban giao/gui tin moi.
 - UI/tai lieu tach ro CustomerProfile, Contact va ArchiveStory.
 
-## 7. Viec nen lam ngay tiep theo
+## 7. Ke hoach trien khai chi tiet tu trang thai hien tai
 
-Uu tien cao nhat:
+Bon phan nen da co va khong can lam lai:
 
-1. Tao trang chi tiet CustomerProfile.
-2. Them tab `Zalo` va thao tac gan group tu CustomerProfile.
-3. Them tab `Nguoi lien he`.
-4. Them tab `Ho so luu`.
+1. Trang chi tiet `CustomerProfile`.
+2. Gan/go group va User Zalo tu tab `Zalo`.
+3. Tao, sua, dat lien he chinh va khoa `Nguoi lien he`.
+4. Danh sach `Ho so luu` theo khach hang va customer snapshot.
 
-Ly do: cac API/schema nen da co nhieu, nhung workflow chinh van thieu diem bat
-dau tu ho so khach hang. Khi co trang chi tiet, cac phan sync, lien he, zalo,
-archive va assignment se co noi dung de gan vao dung cho.
+Phan con lai duoc chia thanh cac goi nho ben duoi. Moi goi chi duoc danh dau
+hoan thanh sau khi build, test API va test workflow tren UI.
+
+### Goi 1 - Chot CustomerProfile detail va du lieu local
+
+Muc tieu: trang chi tiet la noi sua thong tin khach hang an toan, phan biet ro
+du lieu Sheet va du lieu bo sung tren CRM.
+
+Can lam:
+
+1. Hoan thien `PATCH /api/v1/customer-profiles/:id`.
+2. Them quyen xem/sua tung nhom field.
+3. Them audit cho thay doi ten, MST, dia chi, owner, department va loai hinh.
+4. Danh dau ro field:
+   - `Sheet-owned`: gia tri lay tu Google Sheet.
+   - `CRM-owned`: gia tri chi quan ly tren CRM.
+   - `Local override`: da sua tren CRM va khong tu ghi de khi sync an toan.
+5. Them tab hoac panel `Lich su thay doi`.
+6. Chuan hoa tieng Viet co dau va nhan field tren toan trang.
+
+UI bi tac dong:
+
+- `Khach hang > Ho so > Chi tiet > Tong quan`.
+- Them nut `Sua`, popup/form sua, `Luu thay doi`, `Huy`.
+- Hien nguon du lieu va thoi diem cap nhat cho field quan trong.
+
+Test UI:
+
+1. Mo khach hang `01637 - CUA HANG TRUNG HAU`.
+2. Sua mot field CRM-owned va reload trang.
+3. Chay sync an toan, field CRM-owned van duoc giu.
+4. User khong co quyen chi xem, khong sua duoc.
+
+Dieu kien hoan thanh:
+
+- Khong sua truc tiep `rawRow`.
+- Moi thay doi co audit user va thoi gian.
+- Build backend/frontend va test API thanh cong.
+
+### Goi 2 - Chot lien ket Zalo va Nguoi lien he
+
+Muc tieu: dong bo quan he giua `User Zalo` va `Nguoi lien he` ma khong tao
+trung Contact, khong tu chuyen lien ket sang khach hang khac.
+
+Can lam:
+
+1. Tach `CustomerProfilePhone` de mot khach hang co nhieu so lien he.
+2. Cho dat mot so dien thoai mac dinh; moi thoi diem chi co mot so active mac
+   dinh.
+3. Chuan hoa so dien thoai truoc khi tim trung.
+4. Hoan thien lookup:
+   - So dien thoai da co Contact.
+   - So dien thoai co User Zalo trong friends/conversations.
+   - User Zalo duoc nhin thay qua nhung nick CRM nao.
+5. Neu so chua co trong CRM, bo sung lookup Zalo truc tiep theo tung nick duoc
+   phep truy cap.
+6. Khi gan User Zalo co SDT hop le, tao/gan Nguoi lien he tuong ung.
+7. Khi gan Nguoi lien he co Zalo identity, tao/gan User Zalo tuong ung.
+8. Khi go mot ben, kiem tra lien ket ben con lai va hoi co go ca hai hay khong.
+9. Khong tu transfer neu User Zalo dang thuoc CustomerProfile khac.
+10. Them audit cho gan, go, transfer va thay doi lien he chinh.
+
+UI bi tac dong:
+
+- `Chi tiet khach hang > Zalo`.
+- `Chi tiet khach hang > Nguoi lien he`.
+- Popup sua lien he, popup cac nick Zalo ket ban va cac confirm go lien ket.
+
+Test UI:
+
+1. Them Nguoi lien he bang SDT da co Zalo friend.
+2. Kiem tra User Zalo tu dong xuat hien dung mot lan.
+3. Gan User Zalo khong co SDT: chi gan tab Zalo va hien thong bao.
+4. Go User Zalo: confirm co go Nguoi lien he hay khong.
+5. Go Nguoi lien he: confirm co go User Zalo hay khong.
+6. Contact thuoc nhieu CustomerProfile khong bi gop hoac transfer ngam.
+
+Dieu kien hoan thanh:
+
+- Mot `zaloGlobalId` khong tao nhieu User Zalo logic.
+- Mot SDT chuan hoa khong tao Contact trung.
+- Hai chieu hien cung trang thai sau reload.
+
+### Goi 3 - Hoan thien Ho so luu trong CustomerProfile
+
+Muc tieu: xem va thao tac nhanh ho so cua khach hang ma khong roi khoi trang
+khach hang.
+
+Can lam:
+
+1. Nut `Mo` hien popup chi tiet ArchiveStory.
+2. Popup co nut `Mo tai man Ho so` khi can thao tac day du.
+3. Dong popup khong redirect va van mo duoc ho so khac.
+4. Bo sung filter nguoi phu trach, phong ban va khoang ngay.
+5. Hien ro customer snapshot, context source va conversation source.
+6. Xu ly case conversation 1:1 lien quan nhieu CustomerProfile: bat user chon
+   customer context khi luu.
+
+UI bi tac dong:
+
+- `Chi tiet khach hang > Ho so luu`.
+- Popup xem nhanh ArchiveStory.
+- Luong luu ho so tu man `Tin nhan`.
+
+Test UI:
+
+1. Mo lien tiep nhieu ho so trong popup.
+2. Dong popup van o dung CustomerProfile.
+3. Nut `Mo tai man Ho so` redirect dung story.
+4. Doi link Zalo sau do khong lam snapshot ho so cu thay doi.
+
+Dieu kien hoan thanh:
+
+- Phan trang/filter dung tong so dong.
+- Popup khong lam thay doi URL neu user khong chon redirect.
+
+### Goi 4 - Hoan thien van hanh dong bo Google Sheet
+
+Muc tieu: admin xem truoc, chon dong va ap dung du lieu co kiem soat.
+
+Can lam:
+
+1. Chot UI preview snapshot va phan trang server-side.
+2. Loc cac dong:
+   - Hop le.
+   - Thieu ma/ten.
+   - Trung ma trong cung snapshot.
+   - Xung dot voi CRM.
+   - Da apply.
+3. Cho apply:
+   - Cac dong duoc chon.
+   - Tat ca dong theo filter hien tai.
+   - Tat ca dong hop le.
+4. Hoan thien hai mode:
+   - `Update an toan`.
+   - `Ghi de tu Sheet`.
+5. Hien field diff truoc khi ghi de.
+6. Giu field CRM-owned va local override trong mode an toan.
+7. Danh dau `missing_from_source`, khong xoa profile khi dong mat khoi Sheet.
+8. Hoan thien mapping cot va queue field chua map.
+9. Lich su chi hien 5 run gan nhat; dropdown xem them va popup chi tiet run.
+10. Luu tru/khoi phuc/xoa nguon co permission va audit.
+
+UI bi tac dong:
+
+- `Khach hang > Dong bo`.
+- Preview snapshot, filter, checkbox chon dong, popup diff va lich su run.
+
+Test UI:
+
+1. Preview source `DU_LIEU_KH`, range `A1:V2700`.
+2. Loc dong loi va dong hop le.
+3. Apply mot dong, mot nhom dong va tat ca hop le.
+4. Apply lai khong tao CustomerProfile trung.
+5. Sua field CRM local, sync an toan khong ghi de.
+6. Sync ghi de chi chay sau confirm va hien field diff.
+7. Dong mat khoi Sheet chi bi danh dau missing.
+
+Dieu kien hoan thanh:
+
+- Run khong bi treo `running`.
+- Snapshot va history xem lai duoc.
+- Ket qua created/updated/skipped/error khop DB.
+
+### Goi 5 - Scheduled sync hardening
+
+Muc tieu: dong bo dinh ky chay on dinh va quan sat duoc.
+
+Can lam:
+
+1. Load cac source enabled khi app start.
+2. Reload schedule khi tao/sua/luu tru source.
+3. Lock theo source de manual va scheduled run khong chay chong.
+4. Scheduled sync mac dinh chi dung `Update an toan`.
+5. Luu trigger, startedAt, finishedAt, error va thong ke row.
+6. Hien `Lan chay truoc`, `Lan chay tiep theo` va canh bao credential/API.
+7. Them timeout va co che ket thuc run bi treo.
+
+UI bi tac dong:
+
+- Card nguon dong bo.
+- Popup lich su sync.
+
+Test UI:
+
+1. Dat cron ngan trong moi truong test.
+2. Xac nhan run duoc tao dung lich.
+3. Bam sync tay khi scheduled run dang chay va nguoc lai.
+4. Thu credential sai va Google Sheets API disabled.
+
+Dieu kien hoan thanh:
+
+- Khong co hai active run cung source.
+- Loi van hanh hien ro tren UI, khong chi nam trong log.
+
+### Goi 6 - Phan cong va CRM tag
+
+Muc tieu: CustomerProfile tro thanh trung tam phan cong cong viec, nhung khong
+tu cap quyen Zalo.
+
+Can lam:
+
+1. Them `CustomerProfileWorkAssignment`.
+2. Gan owner, collaborator, watcher cho CustomerProfile.
+3. Them tab `Phan cong`.
+4. Queue `Chua phan cong` va `Duoc giao cho toi`.
+5. Gan CRM tag cho customer/group/user canonical.
+6. Tach hoan toan `CRM tag` va `Zalo native label`.
+7. Native label hien theo nick; CRM tag hien theo canonical subject.
+8. Them filter assignment/tag tren Khach hang, Nhom Zalo va Tin nhan.
+
+UI bi tac dong:
+
+- `Chi tiet khach hang > Phan cong`.
+- Danh sach `Khach hang`.
+- `Nhom Zalo` va bo loc `Tin nhan`.
+
+Test UI:
+
+1. Manager gan sale phu trach khach hang.
+2. Sale xem queue `Duoc giao cho toi`.
+3. User khong co account access van khong doc/chat duoc nick Zalo.
+4. Sua native label khong lam thay doi CRM tag va nguoc lai.
+
+Dieu kien hoan thanh:
+
+- Assignment va permission la hai lop doc lap.
+- CRM tag khong goi Zalo SDK.
+
+### Goi 7 - Ban giao qua nhom chung va lifecycle
+
+Muc tieu: hai user quan ly hai nick cung mot group co the ban giao dung duong
+hop le, co audit va khong dung nick da roi nhom.
+
+Can lam:
+
+1. Lay candidate theo active group membership.
+2. Luu `sourceZaloAccountId`, `handlingZaloAccountId`, `assignedUserId` va
+   `nativeGroupId`.
+3. Them selector nick xu ly khi co nhieu nick hop le.
+4. Audit moi lan doi handling account.
+5. Hien membership `active`, `stale`, `left`, `removed`.
+6. Them queue group can review.
+7. Chan gui/ban giao qua nick khong con active.
+
+UI bi tac dong:
+
+- Popup ban giao ArchiveStory.
+- `Nhom Zalo > Chi tiet`.
+- Canh bao tren `Tin nhan` khi nick xu ly khong con trong group.
+
+Test UI:
+
+1. Primary nick A ban giao cho primary nick B trong cung canonical group.
+2. B khong can la secondary cua nick A.
+3. Cho B roi group va xac nhan B khong con trong candidate.
+4. Lich su cu van giu source/handling account.
+
+Dieu kien hoan thanh:
+
+- Khong suy dien quyen qua group khac.
+- Moi lan ban giao co audit day du.
+
+### Goi 8 - Dedup native message va backfill
+
+Muc tieu: hai nick cung group khong luu trung mot tin native.
+
+Can lam:
+
+1. Test hai user luu cung mot message qua hai nick.
+2. Test race condition hai request dong thoi.
+3. Backfill `nativeZaloMessageId` cho du lieu cu co du thong tin.
+4. Them fallback fingerprint cho du lieu cu chua native id.
+5. Fingerprint chi canh bao `likely_duplicate`, khong tu dong chan.
+6. Khi conflict, tra ve ArchiveStory dang giu message.
+
+UI bi tac dong:
+
+- Luong luu ho so tu `Tin nhan`.
+- Thong bao duplicate/likely duplicate va link mo ho so da ton tai.
+
+Test UI:
+
+1. Luu cung tin tu hai nick cua mot group.
+2. Bam luu dong thoi o hai phien.
+3. Thu tin cu khong co native id.
+
+Dieu kien hoan thanh:
+
+- Unique native message duoc bao ve o DB.
+- Khong duplicate am tham.
+
+### Goi 9 - Chuan hoa thuat ngu va tai lieu
+
+Muc tieu: nguoi dung khong nham CustomerProfile, Contact va ArchiveStory.
+
+Can lam:
+
+1. Chot ten UI:
+   - `Khach hang`/`Ho so khach hang`: CustomerProfile.
+   - `Lien he Zalo`: Contact/Zalo identity.
+   - `Ho so luu`: ArchiveStory.
+2. Chuan hoa tieng Viet co dau va sua encoding.
+3. Cap nhat README, user guide va plan index.
+4. Them huong dan test UI cho moi workflow chinh.
+
+Dieu kien hoan thanh:
+
+- Cung mot thuat ngu duoc dung thong nhat tren nav, button, popup va tai lieu.
+
+### Thu tu thuc hien va checkpoint
+
+Thu tu khuyen nghi:
+
+1. Goi 1: CustomerProfile detail/local override.
+2. Goi 2: Zalo va Nguoi lien he.
+3. Goi 3: Ho so luu popup.
+4. Goi 4: Manual Sheet sync.
+5. Goi 5: Scheduled sync.
+6. Goi 6: Assignment va CRM tag.
+7. Goi 7: Handover va lifecycle.
+8. Goi 8: Dedup/backfill.
+9. Goi 9: Tai lieu va thuat ngu.
+
+Sau moi goi:
+
+1. Cap nhat trang thai ngay trong file plan nay.
+2. Liet ke ro cac man hinh/API bi thay doi.
+3. Build backend va frontend.
+4. Chay test lien quan va kiem tra log runtime.
+5. Restart app neu can.
+6. Giao cho user checklist test UI theo du lieu that.
+7. Chi chuyen sang goi tiep theo sau khi checkpoint hien tai dat.

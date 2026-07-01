@@ -815,6 +815,120 @@ export async function customerMasterRoutes(app: FastifyInstance): Promise<void> 
     };
   });
 
+  app.get('/api/v1/customer-profiles/conversation-context', async (request, reply) => {
+    const actor = currentActor(request);
+    const query = (request.query || {}) as { conversationId?: string };
+    const conversationId = String(query.conversationId || '').trim();
+    if (!conversationId) return badRequest(reply, 'conversationId is required');
+
+    const customerProfileSelect = {
+      id: true,
+      code: true,
+      externalKey: true,
+      name: true,
+      shortName: true,
+      type: true,
+      mainPhone: true,
+      phone: true,
+      taxCode: true,
+      provinceOrRegion: true,
+      salesOwnerCodeSnapshot: true,
+      managingDepartmentCodeSnapshot: true,
+      customerTypeCodeSnapshot: true,
+      ownerUser: { select: { id: true, fullName: true } },
+      managingDepartment: { select: { id: true, name: true } },
+      customerType: { select: { id: true, code: true, name: true } },
+      _count: {
+        select: {
+          archiveStories: true,
+          contacts: { where: { isActive: true } },
+          zaloGroups: true,
+          zaloUsers: true,
+        },
+      },
+    } satisfies Prisma.CustomerProfileSelect;
+
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, orgId: actor.orgId },
+      select: {
+        id: true,
+        threadType: true,
+        groupName: true,
+        contactId: true,
+        nativeGroupId: true,
+        nativeGroup: {
+          select: {
+            customerLink: {
+              select: {
+                customerProfile: { select: customerProfileSelect },
+              },
+            },
+          },
+        },
+        contact: {
+          select: {
+            fullName: true,
+            customerProfileLink: {
+              select: {
+                customerProfile: { select: customerProfileSelect },
+              },
+            },
+            customerProfileContacts: {
+              where: { isActive: true },
+              orderBy: [{ isPrimary: 'desc' }, { linkedAt: 'desc' }],
+              take: 2,
+              select: {
+                customerProfile: { select: customerProfileSelect },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!conversation) return reply.status(404).send({ error: 'Conversation not found' });
+
+    if (conversation.threadType === 'group') {
+      const customerProfile = conversation.nativeGroup?.customerLink?.customerProfile || null;
+      return {
+        context: customerProfile
+          ? {
+              source: 'group',
+              sourceLabel: 'Nhóm Zalo',
+              subjectId: conversation.nativeGroupId,
+              subjectName: conversation.groupName,
+              customerProfile,
+            }
+          : null,
+      };
+    }
+
+    const directProfile = conversation.contact?.customerProfileLink?.customerProfile || null;
+    if (directProfile) {
+      return {
+        context: {
+          source: 'direct_user',
+          sourceLabel: 'User Zalo',
+          subjectId: conversation.contactId,
+          subjectName: conversation.contact?.fullName,
+          customerProfile: directProfile,
+        },
+      };
+    }
+
+    const contactProfiles = conversation.contact?.customerProfileContacts || [];
+    return {
+      context: contactProfiles.length === 1
+        ? {
+            source: 'direct_contact',
+            sourceLabel: 'Người liên hệ',
+            subjectId: conversation.contactId,
+            subjectName: conversation.contact?.fullName,
+            customerProfile: contactProfiles[0].customerProfile,
+          }
+        : null,
+    };
+  });
+
   app.get('/api/v1/customer-profiles/:id', async (request, reply) => {
     const actor = currentActor(request);
     const { id } = request.params as { id: string };
